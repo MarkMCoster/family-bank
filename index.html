@@ -1,0 +1,2060 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Family Bank" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="theme-color" content="#0e3a2e" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="icon-192.png" />
+  <link rel="icon" type="image/png" href="icon-192.png" />
+  <title>Family Bank</title>
+
+  <!-- Fonts: Fraunces (display) + Inter Tight (body) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700;9..144,900&family=Inter+Tight:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+  <style>
+    :root {
+      --bg: #f5efe1;          /* warm cream */
+      --bg-2: #ede4cf;
+      --ink: #142a1f;         /* deep forest */
+      --ink-soft: #2d4438;
+      --muted: #6b7a72;
+      --green: #1f6b4a;       /* primary */
+      --green-deep: #0e3a2e;
+      --green-light: #d6e7da;
+      --gold: #c9a24b;        /* accent */
+      --red: #b04545;
+      --card: #fffdf7;
+      --line: #e3d8bf;
+      --shadow-sm: 0 1px 2px rgba(20,42,31,.06), 0 2px 8px rgba(20,42,31,.04);
+      --shadow-md: 0 4px 12px rgba(20,42,31,.08), 0 12px 32px rgba(20,42,31,.06);
+      --shadow-lg: 0 20px 60px rgba(20,42,31,.18);
+      --radius: 18px;
+      --radius-sm: 12px;
+      --radius-lg: 26px;
+    }
+
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body {
+      margin: 0; padding: 0;
+      min-height: 100vh;
+      min-height: 100dvh;
+      font-family: 'Inter Tight', system-ui, sans-serif;
+      color: var(--ink);
+      background: var(--bg);
+      -webkit-font-smoothing: antialiased;
+      overscroll-behavior-y: none;
+    }
+    body {
+      padding-top: env(safe-area-inset-top);
+      padding-bottom: env(safe-area-inset-bottom);
+    }
+    button { font-family: inherit; cursor: pointer; border: none; background: none; color: inherit; }
+    input, select, textarea { font-family: inherit; font-size: 16px; }
+    a { color: var(--green); }
+
+    /* Decorative background */
+    .bg-deco {
+      position: fixed; inset: 0; z-index: -1; pointer-events: none;
+      background:
+        radial-gradient(circle at 15% 10%, rgba(31,107,74,.08), transparent 40%),
+        radial-gradient(circle at 85% 90%, rgba(201,162,75,.10), transparent 45%),
+        var(--bg);
+    }
+    .bg-deco::after {
+      content: ""; position: absolute; inset: 0;
+      background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/><feColorMatrix values='0 0 0 0 0.08 0 0 0 0 0.16 0 0 0 0 0.12 0 0 0 0.06 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+      opacity: .35;
+      mix-blend-mode: multiply;
+    }
+
+    /* App container */
+    .app {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 20px 18px 100px;
+      min-height: 100vh;
+      min-height: 100dvh;
+    }
+
+    /* === LOGIN / AUTH SCREENS === */
+    .auth-wrap {
+      min-height: 100vh;
+      min-height: 100dvh;
+      display: flex; flex-direction: column;
+      justify-content: center; align-items: center;
+      padding: 24px;
+      gap: 28px;
+    }
+    .brand {
+      text-align: center;
+      animation: fadeUp .7s ease both;
+    }
+    .brand .crest {
+      width: 92px; height: 92px;
+      margin: 0 auto 14px;
+      border-radius: 50%;
+      background: linear-gradient(145deg, var(--green-deep), var(--green));
+      display: grid; place-items: center;
+      box-shadow: var(--shadow-md), inset 0 0 0 4px var(--bg), inset 0 0 0 5px var(--gold);
+      position: relative;
+    }
+    .brand .crest svg { width: 44px; height: 44px; }
+    .brand h1 {
+      font-family: 'Fraunces', serif;
+      font-weight: 600;
+      font-size: 38px;
+      letter-spacing: -.02em;
+      margin: 0;
+      color: var(--green-deep);
+    }
+    .brand h1 em {
+      font-style: italic; font-weight: 400;
+      color: var(--gold);
+    }
+    .brand p {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+
+    .card {
+      background: var(--card);
+      border-radius: var(--radius-lg);
+      padding: 28px 24px;
+      box-shadow: var(--shadow-md);
+      border: 1px solid var(--line);
+      width: 100%;
+      max-width: 420px;
+      animation: fadeUp .7s .1s ease both;
+    }
+    .card h2 {
+      font-family: 'Fraunces', serif;
+      font-weight: 500;
+      font-size: 24px;
+      margin: 0 0 4px;
+      color: var(--green-deep);
+    }
+    .card .sub {
+      color: var(--muted);
+      font-size: 14px;
+      margin-bottom: 22px;
+    }
+
+    .field {
+      display: block;
+      margin-bottom: 14px;
+    }
+    .field label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--ink-soft);
+      margin-bottom: 6px;
+    }
+    .field input, .field select {
+      width: 100%;
+      padding: 13px 14px;
+      border: 1.5px solid var(--line);
+      border-radius: var(--radius-sm);
+      background: var(--bg);
+      color: var(--ink);
+      transition: border-color .15s, background .15s;
+    }
+    .field input:focus, .field select:focus {
+      outline: none;
+      border-color: var(--green);
+      background: #fff;
+    }
+
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      gap: 8px;
+      padding: 14px 18px;
+      border-radius: var(--radius-sm);
+      font-weight: 600;
+      font-size: 15px;
+      transition: transform .08s, box-shadow .15s, background .15s;
+      width: 100%;
+    }
+    .btn:active { transform: scale(.98); }
+    .btn-primary {
+      background: var(--green-deep);
+      color: var(--bg);
+      box-shadow: var(--shadow-sm);
+    }
+    .btn-primary:hover { background: var(--green); }
+    .btn-ghost {
+      background: transparent;
+      color: var(--green-deep);
+      border: 1.5px solid var(--line);
+    }
+    .btn-ghost:hover { background: var(--bg); }
+    .btn-danger { background: var(--red); color: #fff; }
+
+    .toggle-link {
+      text-align: center;
+      margin-top: 18px;
+      font-size: 14px;
+      color: var(--muted);
+    }
+    .toggle-link button {
+      color: var(--green-deep);
+      font-weight: 600;
+      text-decoration: underline;
+    }
+
+    .err {
+      background: #fbe9e9;
+      color: var(--red);
+      border-radius: var(--radius-sm);
+      padding: 10px 12px;
+      font-size: 13px;
+      margin-bottom: 14px;
+      border: 1px solid #f0c9c9;
+    }
+
+    /* Login-mode tabs */
+    .mode-tabs {
+      display: flex;
+      background: var(--bg);
+      border-radius: 12px;
+      padding: 4px;
+      margin-bottom: 22px;
+      border: 1px solid var(--line);
+    }
+    .mode-tabs button {
+      flex: 1;
+      padding: 10px;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 14px;
+      color: var(--muted);
+      transition: all .15s;
+    }
+    .mode-tabs button.active {
+      background: var(--card);
+      color: var(--green-deep);
+      box-shadow: var(--shadow-sm);
+    }
+
+    /* PIN input */
+    .pin-input {
+      display: flex; gap: 10px; justify-content: center; margin: 14px 0 6px;
+    }
+    .pin-input input {
+      width: 56px; height: 64px;
+      text-align: center;
+      font-size: 26px;
+      font-weight: 700;
+      font-family: 'Fraunces', serif;
+      border: 1.5px solid var(--line);
+      border-radius: var(--radius-sm);
+      background: var(--bg);
+      color: var(--green-deep);
+    }
+    .pin-input input:focus {
+      outline: none;
+      border-color: var(--green);
+      background: #fff;
+    }
+
+    /* === HEADER === */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 22px;
+      padding-top: 8px;
+    }
+    .header .greet {
+      font-family: 'Fraunces', serif;
+      font-size: 22px;
+      font-weight: 500;
+      color: var(--green-deep);
+      letter-spacing: -.01em;
+    }
+    .header .greet small {
+      display: block;
+      font-family: 'Inter Tight', sans-serif;
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: .14em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 2px;
+    }
+    .icon-btn {
+      width: 42px; height: 42px;
+      border-radius: 50%;
+      background: var(--card);
+      display: grid; place-items: center;
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow-sm);
+    }
+    .icon-btn:hover { background: var(--bg-2); }
+
+    /* === TOTAL BALANCE CARD === */
+    .total-card {
+      background: linear-gradient(145deg, var(--green-deep) 0%, var(--green) 100%);
+      color: var(--bg);
+      border-radius: var(--radius-lg);
+      padding: 26px 24px 24px;
+      margin-bottom: 22px;
+      position: relative;
+      overflow: hidden;
+      box-shadow: var(--shadow-md);
+    }
+    .total-card::before {
+      content: ""; position: absolute;
+      top: -40px; right: -40px;
+      width: 180px; height: 180px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(201,162,75,.30), transparent 70%);
+    }
+    .total-card::after {
+      content: ""; position: absolute;
+      bottom: -60px; left: -30px;
+      width: 200px; height: 200px;
+      border-radius: 50%;
+      border: 1px solid rgba(245,239,225,.10);
+    }
+    .total-card .label {
+      font-size: 11px;
+      letter-spacing: .16em;
+      text-transform: uppercase;
+      opacity: .75;
+      margin-bottom: 6px;
+      position: relative;
+    }
+    .total-card .amount {
+      font-family: 'Fraunces', serif;
+      font-size: 44px;
+      font-weight: 500;
+      letter-spacing: -.02em;
+      line-height: 1;
+      position: relative;
+    }
+    .total-card .amount .cents {
+      font-size: 24px;
+      opacity: .7;
+    }
+    .total-card .meta {
+      margin-top: 14px;
+      display: flex;
+      gap: 18px;
+      font-size: 13px;
+      opacity: .85;
+      position: relative;
+    }
+    .total-card .meta b { color: var(--gold); font-weight: 600; }
+
+    /* === SECTION HEAD === */
+    .section-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      margin: 24px 4px 12px;
+    }
+    .section-head h3 {
+      font-family: 'Fraunces', serif;
+      font-weight: 500;
+      font-size: 20px;
+      margin: 0;
+      color: var(--green-deep);
+    }
+    .section-head a {
+      font-size: 13px;
+      color: var(--muted);
+      text-decoration: none;
+    }
+
+    /* === CHILD CARDS === */
+    .kids-list { display: flex; flex-direction: column; gap: 12px; }
+    .kid-card {
+      background: var(--card);
+      border-radius: var(--radius);
+      padding: 16px 18px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow-sm);
+      transition: transform .12s, box-shadow .15s;
+      width: 100%;
+      text-align: left;
+    }
+    .kid-card:hover { transform: translateY(-1px); box-shadow: var(--shadow-md); }
+    .kid-card:active { transform: scale(.99); }
+    .avatar {
+      width: 48px; height: 48px;
+      border-radius: 50%;
+      background: var(--green-light);
+      color: var(--green-deep);
+      display: grid; place-items: center;
+      font-weight: 700;
+      font-family: 'Fraunces', serif;
+      font-size: 20px;
+      flex-shrink: 0;
+      border: 2px solid var(--card);
+      box-shadow: inset 0 0 0 1px var(--line);
+    }
+    .avatar.gold { background: #f3e6c4; color: #8a6614; }
+    .avatar.rose { background: #f5dada; color: #8a3c3c; }
+    .avatar.sky { background: #d4e3eb; color: #2e5a6e; }
+    .kid-info { flex: 1; min-width: 0; }
+    .kid-info .name {
+      font-weight: 600;
+      font-size: 16px;
+      color: var(--ink);
+      margin: 0 0 2px;
+    }
+    .kid-info .sub {
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .kid-amount {
+      font-family: 'Fraunces', serif;
+      font-size: 22px;
+      font-weight: 500;
+      color: var(--green-deep);
+      letter-spacing: -.01em;
+    }
+    .kid-amount.negative { color: var(--red); }
+    .kid-chev { color: var(--muted); margin-left: 6px; }
+
+    /* === EMPTY STATES === */
+    .empty {
+      background: var(--card);
+      border: 1px dashed var(--line);
+      border-radius: var(--radius);
+      padding: 28px 20px;
+      text-align: center;
+      color: var(--muted);
+    }
+    .empty h4 {
+      font-family: 'Fraunces', serif;
+      color: var(--ink);
+      margin: 0 0 6px;
+      font-size: 17px;
+      font-weight: 500;
+    }
+    .empty p { margin: 0 0 14px; font-size: 14px; }
+
+    /* === FLOATING ADD BUTTON === */
+    .fab {
+      position: fixed;
+      right: calc(env(safe-area-inset-right) + 22px);
+      bottom: calc(env(safe-area-inset-bottom) + 22px);
+      width: 62px; height: 62px;
+      border-radius: 50%;
+      background: var(--green-deep);
+      color: var(--bg);
+      box-shadow: 0 10px 24px rgba(14,58,46,.4), 0 2px 6px rgba(14,58,46,.2);
+      display: grid; place-items: center;
+      transition: transform .15s, box-shadow .15s;
+      z-index: 50;
+      border: 3px solid var(--bg);
+    }
+    .fab:hover { transform: scale(1.05); background: var(--green); }
+    .fab:active { transform: scale(.95); }
+    .fab svg { width: 26px; height: 26px; }
+
+    /* === MODAL === */
+    .modal-bg {
+      position: fixed; inset: 0;
+      background: rgba(14,58,46,.50);
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+      z-index: 100;
+      display: flex; align-items: flex-end; justify-content: center;
+      animation: fadeIn .2s ease;
+    }
+    @media (min-width: 600px) {
+      .modal-bg { align-items: center; }
+    }
+    .modal {
+      background: var(--card);
+      width: 100%;
+      max-width: 480px;
+      border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+      padding: 22px 22px calc(env(safe-area-inset-bottom) + 22px);
+      box-shadow: var(--shadow-lg);
+      animation: slideUp .25s cubic-bezier(.2,.9,.3,1);
+      max-height: 92vh;
+      overflow-y: auto;
+    }
+    @media (min-width: 600px) {
+      .modal { border-radius: var(--radius-lg); }
+    }
+    .modal .grip {
+      width: 38px; height: 4px;
+      background: var(--line);
+      border-radius: 4px;
+      margin: -8px auto 14px;
+    }
+    .modal-head {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 18px;
+    }
+    .modal-head h2 {
+      font-family: 'Fraunces', serif;
+      font-weight: 500;
+      font-size: 22px;
+      margin: 0;
+      color: var(--green-deep);
+    }
+    .close-btn {
+      width: 36px; height: 36px;
+      border-radius: 50%;
+      background: var(--bg);
+      display: grid; place-items: center;
+      color: var(--muted);
+    }
+
+    /* Type toggle (deposit/withdraw) */
+    .type-toggle {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+    .type-toggle button {
+      padding: 14px;
+      border-radius: var(--radius-sm);
+      border: 1.5px solid var(--line);
+      background: var(--bg);
+      font-weight: 600;
+      font-size: 14px;
+      display: flex; align-items: center; justify-content: center; gap: 6px;
+      color: var(--ink-soft);
+    }
+    .type-toggle button.active.deposit {
+      background: var(--green-deep); color: var(--bg); border-color: var(--green-deep);
+    }
+    .type-toggle button.active.withdraw {
+      background: var(--red); color: #fff; border-color: var(--red);
+    }
+
+    /* Amount input large */
+    .amount-input {
+      position: relative;
+      margin-bottom: 14px;
+    }
+    .amount-input .pre {
+      position: absolute;
+      left: 18px; top: 50%; transform: translateY(-50%);
+      font-family: 'Fraunces', serif;
+      font-size: 28px;
+      color: var(--muted);
+    }
+    .amount-input input {
+      width: 100%;
+      padding: 18px 18px 18px 42px;
+      font-family: 'Fraunces', serif;
+      font-size: 32px;
+      font-weight: 500;
+      border: 1.5px solid var(--line);
+      border-radius: var(--radius-sm);
+      background: var(--bg);
+      color: var(--green-deep);
+    }
+    .amount-input input:focus { outline: none; border-color: var(--green); background:#fff; }
+
+    /* Category grid */
+    .cat-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+    .cat-pill {
+      padding: 10px 6px;
+      border-radius: 12px;
+      background: var(--bg);
+      border: 1.5px solid var(--line);
+      display: flex; flex-direction: column; align-items: center; gap: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--ink-soft);
+    }
+    .cat-pill.active { background: var(--green-light); border-color: var(--green); color: var(--green-deep); }
+    .cat-pill .ico { font-size: 20px; line-height: 1; }
+
+    /* === DETAIL / TRANSACTIONS PAGE === */
+    .back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--muted);
+      font-size: 14px;
+      margin-bottom: 14px;
+      font-weight: 500;
+    }
+    .detail-header {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 18px;
+    }
+    .detail-header .avatar { width: 62px; height: 62px; font-size: 26px; }
+    .detail-header h2 {
+      font-family: 'Fraunces', serif;
+      font-size: 28px;
+      margin: 0;
+      color: var(--green-deep);
+      font-weight: 500;
+    }
+    .detail-header .sub { color: var(--muted); font-size: 13px; }
+
+    .balance-feature {
+      background: var(--card);
+      border-radius: var(--radius);
+      padding: 20px 22px;
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow-sm);
+      margin-bottom: 14px;
+      position: relative;
+      overflow: hidden;
+    }
+    .balance-feature::before {
+      content: ""; position: absolute; right: -20px; top: -20px;
+      width: 100px; height: 100px;
+      border: 1px solid var(--green-light);
+      border-radius: 50%;
+    }
+    .balance-feature .lbl {
+      font-size: 11px;
+      letter-spacing: .14em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 4px;
+    }
+    .balance-feature .val {
+      font-family: 'Fraunces', serif;
+      font-size: 42px;
+      font-weight: 500;
+      color: var(--green-deep);
+      letter-spacing: -.02em;
+      line-height: 1;
+    }
+    .balance-feature .val.negative { color: var(--red); }
+    .balance-feature .interest {
+      display: inline-block;
+      margin-top: 10px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: var(--green-light);
+      color: var(--green-deep);
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    /* Goals */
+    .goal-card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 16px 18px;
+      margin-bottom: 10px;
+      box-shadow: var(--shadow-sm);
+    }
+    .goal-card .top {
+      display: flex; justify-content: space-between; align-items: baseline;
+      margin-bottom: 8px;
+    }
+    .goal-card .name { font-weight: 600; font-size: 15px; }
+    .goal-card .amt { font-family: 'Fraunces', serif; color: var(--green-deep); font-weight: 500; font-size: 15px; }
+    .goal-bar {
+      height: 8px;
+      background: var(--bg-2);
+      border-radius: 99px;
+      overflow: hidden;
+    }
+    .goal-bar > div {
+      height: 100%;
+      background: linear-gradient(90deg, var(--green-deep), var(--gold));
+      border-radius: 99px;
+      transition: width .5s ease;
+    }
+    .goal-card .pct {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 6px;
+      display: flex; justify-content: space-between;
+    }
+
+    /* Transactions */
+    .tx-list { display: flex; flex-direction: column; }
+    .tx-item {
+      display: flex;
+      gap: 12px;
+      padding: 14px 4px;
+      border-bottom: 1px solid var(--line);
+      align-items: center;
+    }
+    .tx-item:last-child { border-bottom: none; }
+    .tx-icon {
+      width: 40px; height: 40px;
+      border-radius: 12px;
+      background: var(--green-light);
+      color: var(--green-deep);
+      display: grid; place-items: center;
+      flex-shrink: 0;
+      font-size: 18px;
+    }
+    .tx-icon.out { background: #f5dada; color: var(--red); }
+    .tx-icon.int { background: #f3e6c4; color: #8a6614; }
+    .tx-body { flex: 1; min-width: 0; }
+    .tx-body .note {
+      font-weight: 600;
+      font-size: 14px;
+      color: var(--ink);
+      margin: 0 0 2px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .tx-body .meta {
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .tx-amt {
+      font-family: 'Fraunces', serif;
+      font-weight: 500;
+      font-size: 17px;
+      color: var(--green-deep);
+      letter-spacing: -.01em;
+    }
+    .tx-amt.out { color: var(--red); }
+
+    /* Pending requests */
+    .req-card {
+      background: #fff8e6;
+      border: 1px solid #e6d39a;
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      margin-bottom: 10px;
+    }
+    .req-card .top { display: flex; justify-content: space-between; margin-bottom: 8px; }
+    .req-card .name { font-weight: 600; }
+    .req-card .amt { font-family: 'Fraunces', serif; font-weight: 600; color: #8a6614; }
+    .req-card .note { font-size: 13px; color: var(--ink-soft); margin-bottom: 10px; }
+    .req-actions { display: flex; gap: 8px; }
+    .req-actions button {
+      flex: 1; padding: 8px 12px; border-radius: 10px; font-weight: 600; font-size: 13px;
+    }
+    .req-actions .approve { background: var(--green-deep); color: var(--bg); }
+    .req-actions .deny { background: #f5dada; color: var(--red); }
+
+    /* === KID VIEW === */
+    .kid-view .total-card {
+      background: linear-gradient(145deg, #2a7a55, #1f6b4a 60%, #c9a24b);
+    }
+    .kid-view .greet { font-size: 26px; }
+    .kid-balance-big {
+      font-size: 58px;
+    }
+
+    /* settings list */
+    .list-item {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 14px 16px;
+      background: var(--card);
+      border-bottom: 1px solid var(--line);
+    }
+    .list-item:first-child { border-radius: var(--radius) var(--radius) 0 0; }
+    .list-item:last-child { border-radius: 0 0 var(--radius) var(--radius); border-bottom: none; }
+    .list-item:only-child { border-radius: var(--radius); }
+    .list-block { border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow-sm); margin-bottom: 14px; }
+    .list-item .ico {
+      width: 36px; height: 36px;
+      border-radius: 10px;
+      background: var(--green-light);
+      color: var(--green-deep);
+      display: grid; place-items: center;
+      flex-shrink: 0;
+    }
+    .list-item .label { flex: 1; font-weight: 500; font-size: 14px; }
+    .list-item .val { color: var(--muted); font-size: 13px; }
+
+    /* Animations */
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(12px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes slideUp {
+      from { transform: translateY(20px); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+    .stagger > * { animation: fadeUp .5s ease both; }
+    .stagger > *:nth-child(1) { animation-delay: .04s; }
+    .stagger > *:nth-child(2) { animation-delay: .08s; }
+    .stagger > *:nth-child(3) { animation-delay: .12s; }
+    .stagger > *:nth-child(4) { animation-delay: .16s; }
+    .stagger > *:nth-child(5) { animation-delay: .20s; }
+    .stagger > *:nth-child(6) { animation-delay: .24s; }
+    .stagger > *:nth-child(7) { animation-delay: .28s; }
+
+    /* loading */
+    .loader { display: grid; place-items: center; height: 100vh; }
+    .loader .crest { animation: pulse 1.6s ease-in-out infinite; }
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(.95); opacity: .7; }
+    }
+
+    /* setup banner */
+    .setup-banner {
+      background: #fff8e6;
+      border: 1px solid #e6d39a;
+      color: #6b5616;
+      padding: 14px 18px;
+      border-radius: var(--radius-sm);
+      font-size: 14px;
+      margin-bottom: 14px;
+    }
+    .setup-banner b { display: block; margin-bottom: 4px; }
+    .setup-banner a { color: #6b5616; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="bg-deco"></div>
+
+  <!-- INITIAL LOADER -->
+  <div id="initial-loader" class="loader">
+    <div class="crest" style="width:80px;height:80px;border-radius:50%;background:linear-gradient(145deg,var(--green-deep),var(--green));display:grid;place-items:center;box-shadow:var(--shadow-md),inset 0 0 0 4px var(--bg),inset 0 0 0 5px var(--gold);">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#f5efe1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:36px;height:36px;"><path d="M3 21h18M5 21V10l7-5 7 5v11M9 9h.01M15 9h.01M9 13h.01M15 13h.01M9 17h.01M15 17h.01"/></svg>
+    </div>
+  </div>
+
+  <!-- APP MOUNT -->
+  <div id="root" style="display:none;"></div>
+
+  <!-- Firebase via CDN modular SDK (v10.12) -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+    import {
+      getAuth, onAuthStateChanged,
+      createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut
+    } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+    import {
+      getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc,
+      collection, addDoc, onSnapshot, query, orderBy, serverTimestamp, deleteField
+    } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+
+    // ===== FIREBASE CONFIG =====
+    // PASTE YOUR FIREBASE CONFIG VALUES HERE (see SETUP.md for instructions)
+    const firebaseConfig = {
+  apiKey: "AIzaSyAUxph-yh92J6pfWH61Ge5nICyPRwIphkE",
+  authDomain: "family-bank-5d3fc.firebaseapp.com",
+  projectId: "family-bank-5d3fc",
+  storageBucket: "family-bank-5d3fc.firebasestorage.app",
+  messagingSenderId: "830837637516",
+  appId: "1:830837637516:web:75b552dfd30636ee5496a9",
+  measurementId: "G-L4CHHP6R4R"
+    };
+
+    const isFirebaseConfigured = !firebaseConfig.apiKey.startsWith("PASTE_");
+
+    let app, auth, db;
+    if (isFirebaseConfigured) {
+      app = initializeApp(firebaseConfig);
+      auth = getAuth(app);
+      db = getFirestore(app);
+    }
+
+    // ============= STATE =============
+    const state = {
+      view: 'login',           // login | dashboard | child | settings | kid
+      authMode: 'parent',      // parent | kid
+      authForm: 'login',       // login | signup
+      user: null,              // firebase user
+      family: null,            // { id, name, parents:[uid] }
+      children: [],            // [{id, name, balance, pin, color, interestRate, allowance:{amount,freq,lastPaid}, ...}]
+      transactions: {},        // { childId: [tx...] }
+      goals: {},               // { childId: [goal...] }
+      requests: [],            // pending withdrawal requests
+      selectedChildId: null,
+      kidSession: null,        // {childId, name} when kid is logged in
+      err: '',
+      loading: false,
+      modal: null,             // 'addTx' | 'addKid' | 'addGoal' | 'editKid' | 'settings'
+      modalCtx: {},
+      unsubs: []
+    };
+
+    const CATEGORIES = [
+      { id: 'allowance', label: 'Allowance', ico: '💰', type: 'deposit' },
+      { id: 'chores',    label: 'Chores',    ico: '🧹', type: 'deposit' },
+      { id: 'gift',      label: 'Gift',      ico: '🎁', type: 'deposit' },
+      { id: 'interest',  label: 'Interest',  ico: '✨', type: 'deposit' },
+      { id: 'toy',       label: 'Toy',       ico: '🧸', type: 'withdraw' },
+      { id: 'snack',     label: 'Snack',     ico: '🍪', type: 'withdraw' },
+      { id: 'game',      label: 'Game',      ico: '🎮', type: 'withdraw' },
+      { id: 'other',     label: 'Other',     ico: '•',  type: 'both' },
+    ];
+
+    const AVATAR_COLORS = ['', 'gold', 'rose', 'sky'];
+
+    // ============= HELPERS =============
+    const $ = (sel) => document.querySelector(sel);
+    const fmt = (n) => {
+      const v = Number(n || 0);
+      const s = v.toFixed(2);
+      const [whole, cents] = s.split('.');
+      return { whole: '$' + Number(whole).toLocaleString(), cents: '.' + cents, full: '$' + Math.abs(v).toFixed(2), signed: (v<0?'-':'') + '$' + Math.abs(v).toFixed(2) };
+    };
+    const initials = (name) => (name || '?').trim().split(/\s+/).map(s=>s[0]).slice(0,2).join('').toUpperCase();
+    const formatDate = (ts) => {
+      if (!ts) return '';
+      const d = ts.toDate ? ts.toDate() : new Date(ts);
+      const today = new Date();
+      const isToday = d.toDateString() === today.toDateString();
+      const yest = new Date(today); yest.setDate(yest.getDate()-1);
+      const isYest = d.toDateString() === yest.toDateString();
+      const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      if (isToday) return 'Today, ' + time;
+      if (isYest) return 'Yesterday, ' + time;
+      return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ', ' + time;
+    };
+
+    function escapeHtml(s) {
+      return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    }
+
+    // ============= AUTH / DATA =============
+    async function setupParent(user, familyName) {
+      // Create family doc
+      const familyRef = doc(db, 'families', user.uid);
+      await setDoc(familyRef, {
+        name: familyName || 'Our Family',
+        ownerUid: user.uid,
+        parents: [user.uid],
+        createdAt: serverTimestamp()
+      });
+    }
+
+    async function loadFamilyAndSubscribe(user) {
+      // Try to find a family where user is in parents array.
+      // For simplicity, family doc id == owner uid.
+      const familyRef = doc(db, 'families', user.uid);
+      const snap = await getDoc(familyRef);
+      if (!snap.exists()) {
+        // First-time login: create empty family
+        await setupParent(user, '');
+      }
+      const fSnap = await getDoc(familyRef);
+      state.family = { id: fSnap.id, ...fSnap.data() };
+
+      // Children
+      const childrenCol = collection(db, 'families', state.family.id, 'children');
+      const unsubChildren = onSnapshot(childrenCol, (qs) => {
+        state.children = qs.docs.map(d => ({ id: d.id, ...d.data() }));
+        // subscribe to transactions for each child
+        state.children.forEach(c => subscribeChildTx(c.id));
+        renderApp();
+        // Run auto-allowance check
+        runAllowanceCheck();
+      });
+      state.unsubs.push(unsubChildren);
+
+      // Requests
+      const reqsCol = query(collection(db, 'families', state.family.id, 'requests'), orderBy('createdAt', 'desc'));
+      const unsubReqs = onSnapshot(reqsCol, (qs) => {
+        state.requests = qs.docs.map(d => ({ id: d.id, ...d.data() })).filter(r => r.status === 'pending');
+        renderApp();
+      });
+      state.unsubs.push(unsubReqs);
+    }
+
+    function subscribeChildTx(childId) {
+      if (state.transactions[childId + '_sub']) return;
+      state.transactions[childId + '_sub'] = true;
+      const txCol = query(collection(db, 'families', state.family.id, 'children', childId, 'transactions'), orderBy('createdAt', 'desc'));
+      const unsub = onSnapshot(txCol, (qs) => {
+        state.transactions[childId] = qs.docs.map(d => ({ id: d.id, ...d.data() }));
+        renderApp();
+      });
+      state.unsubs.push(unsub);
+
+      const goalsCol = collection(db, 'families', state.family.id, 'children', childId, 'goals');
+      const unsubG = onSnapshot(goalsCol, (qs) => {
+        state.goals[childId] = qs.docs.map(d => ({ id: d.id, ...d.data() }));
+        renderApp();
+      });
+      state.unsubs.push(unsubG);
+    }
+
+    function teardownSubs() {
+      state.unsubs.forEach(u => { try { u(); } catch {} });
+      state.unsubs = [];
+      state.transactions = {};
+      state.goals = {};
+      state.children = [];
+      state.requests = [];
+    }
+
+    // ============= ACTIONS =============
+    async function doParentSignup(email, password, familyName) {
+      const cred = await createUserWithEmailAndPassword(auth, email, password);
+      await setupParent(cred.user, familyName);
+    }
+    async function doParentLogin(email, password) {
+      await signInWithEmailAndPassword(auth, email, password);
+    }
+    async function doSignOut() {
+      teardownSubs();
+      state.user = null; state.family = null;
+      state.kidSession = null;
+      await signOut(auth);
+      state.view = 'login';
+      renderApp();
+    }
+
+    async function addChild({ name, pin, color }) {
+      const childrenCol = collection(db, 'families', state.family.id, 'children');
+      await addDoc(childrenCol, {
+        name,
+        pin,
+        color: color || '',
+        balance: 0,
+        interestRate: 0,
+        allowance: null,
+        createdAt: serverTimestamp()
+      });
+    }
+
+    async function updateChild(childId, patch) {
+      const ref = doc(db, 'families', state.family.id, 'children', childId);
+      await updateDoc(ref, patch);
+    }
+
+    async function deleteChild(childId) {
+      // delete subcollection docs would be costly; we just delete the child doc.
+      // For full cleanup the user can do it from the firebase console, but the child is hidden from the UI.
+      const ref = doc(db, 'families', state.family.id, 'children', childId);
+      await deleteDoc(ref);
+    }
+
+    async function addTransaction({ childId, amount, type, note, category }) {
+      const child = state.children.find(c => c.id === childId);
+      if (!child) return;
+      const delta = type === 'deposit' ? Math.abs(amount) : -Math.abs(amount);
+      const newBalance = (Number(child.balance) || 0) + delta;
+      // write tx
+      const txCol = collection(db, 'families', state.family.id, 'children', childId, 'transactions');
+      await addDoc(txCol, {
+        type,
+        amount: Math.abs(amount),
+        delta,
+        note: note || '',
+        category: category || 'other',
+        balanceAfter: newBalance,
+        createdAt: serverTimestamp()
+      });
+      // update balance
+      const ref = doc(db, 'families', state.family.id, 'children', childId);
+      await updateDoc(ref, { balance: newBalance });
+    }
+
+    async function addGoal({ childId, name, target }) {
+      const col = collection(db, 'families', state.family.id, 'children', childId, 'goals');
+      await addDoc(col, { name, target: Number(target), createdAt: serverTimestamp() });
+    }
+    async function deleteGoal(childId, goalId) {
+      await deleteDoc(doc(db, 'families', state.family.id, 'children', childId, 'goals', goalId));
+    }
+
+    async function payInterestAll() {
+      for (const c of state.children) {
+        if (c.interestRate && c.balance > 0) {
+          const interest = +(c.balance * (c.interestRate / 100)).toFixed(2);
+          if (interest >= 0.01) {
+            await addTransaction({
+              childId: c.id,
+              amount: interest,
+              type: 'deposit',
+              note: `Monthly interest (${c.interestRate}%)`,
+              category: 'interest'
+            });
+          }
+        }
+      }
+    }
+
+    async function runAllowanceCheck() {
+      // Check each child for due allowance.
+      const now = new Date();
+      for (const c of state.children) {
+        if (!c.allowance || !c.allowance.amount) continue;
+        const { amount, freq, lastPaid } = c.allowance;
+        const last = lastPaid?.toDate ? lastPaid.toDate() : (lastPaid ? new Date(lastPaid) : null);
+        const intervalDays = freq === 'weekly' ? 7 : freq === 'biweekly' ? 14 : 30;
+        const due = !last || ((now - last) / 86400000 >= intervalDays);
+        if (due) {
+          await addTransaction({
+            childId: c.id,
+            amount: Number(amount),
+            type: 'deposit',
+            note: `${freq.charAt(0).toUpperCase()+freq.slice(1)} allowance`,
+            category: 'allowance'
+          });
+          await updateChild(c.id, { allowance: { ...c.allowance, lastPaid: serverTimestamp() } });
+        }
+      }
+    }
+
+    async function submitRequest({ childId, amount, note }) {
+      const col = collection(db, 'families', state.family.id, 'requests');
+      await addDoc(col, {
+        childId,
+        childName: state.children.find(c=>c.id===childId)?.name || '',
+        amount: Number(amount),
+        note: note || '',
+        status: 'pending',
+        createdAt: serverTimestamp()
+      });
+    }
+    async function decideRequest(reqId, approve) {
+      const req = state.requests.find(r => r.id === reqId);
+      if (!req) return;
+      if (approve) {
+        await addTransaction({
+          childId: req.childId, amount: req.amount, type: 'withdraw',
+          note: req.note || 'Approved request', category: 'other'
+        });
+      }
+      const ref = doc(db, 'families', state.family.id, 'requests', reqId);
+      await updateDoc(ref, { status: approve ? 'approved' : 'denied' });
+    }
+
+    // ============= RENDER =============
+    function renderApp() {
+      const root = $('#root');
+      $('#initial-loader').style.display = 'none';
+      root.style.display = 'block';
+
+      if (!isFirebaseConfigured) {
+        root.innerHTML = renderSetupNeeded();
+        return;
+      }
+
+      if (state.view === 'login') {
+        root.innerHTML = renderLogin();
+        wireLogin();
+        return;
+      }
+
+      if (state.view === 'kid' && state.kidSession) {
+        root.innerHTML = renderKidView();
+        wireKid();
+        return;
+      }
+
+      if (state.view === 'child' && state.selectedChildId) {
+        root.innerHTML = renderChildDetail();
+        wireChildDetail();
+        return;
+      }
+
+      if (state.view === 'settings') {
+        root.innerHTML = renderSettings();
+        wireSettings();
+        return;
+      }
+
+      // dashboard
+      root.innerHTML = renderDashboard();
+      wireDashboard();
+    }
+
+    // ----- Setup needed screen -----
+    function renderSetupNeeded() {
+      return `
+      <div class="auth-wrap">
+        <div class="brand">
+          <div class="crest">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#f5efe1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18M5 21V10l7-5 7 5v11M9 9h.01M15 9h.01M9 13h.01M15 13h.01M9 17h.01M15 17h.01"/></svg>
+          </div>
+          <h1>Family <em>Bank</em></h1>
+          <p>Welcome</p>
+        </div>
+        <div class="card">
+          <h2>Setup needed</h2>
+          <p class="sub">Your Firebase config hasn't been added yet. Open <code>index.html</code> and paste your Firebase config values into the <code>firebaseConfig</code> object near the top of the script section.</p>
+          <p class="sub">See <a href="SETUP.md">SETUP.md</a> for step-by-step instructions.</p>
+        </div>
+      </div>
+      `;
+    }
+
+    // ----- LOGIN -----
+    function renderLogin() {
+      const isParent = state.authMode === 'parent';
+      const isSignup = state.authForm === 'signup' && isParent;
+
+      return `
+      <div class="auth-wrap">
+        <div class="brand">
+          <div class="crest">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#f5efe1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18M5 21V10l7-5 7 5v11M9 9h.01M15 9h.01M9 13h.01M15 13h.01M9 17h.01M15 17h.01"/></svg>
+          </div>
+          <h1>Family <em>Bank</em></h1>
+          <p>Member since today</p>
+        </div>
+
+        <div class="card">
+          <div class="mode-tabs">
+            <button data-mode="parent" class="${isParent?'active':''}">Parent</button>
+            <button data-mode="kid" class="${!isParent?'active':''}">Kid</button>
+          </div>
+
+          ${state.err ? `<div class="err">${escapeHtml(state.err)}</div>` : ''}
+
+          ${isParent ? `
+            <h2>${isSignup ? 'Open an account' : 'Welcome back'}</h2>
+            <p class="sub">${isSignup ? 'Create your family bank in a moment.' : 'Sign in to manage your family\'s accounts.'}</p>
+            ${isSignup ? `
+              <div class="field">
+                <label>Family Name</label>
+                <input id="fld-family" type="text" placeholder="The Smith Family" autocomplete="off"/>
+              </div>` : ''}
+            <div class="field">
+              <label>Email</label>
+              <input id="fld-email" type="email" placeholder="you@example.com" autocomplete="email"/>
+            </div>
+            <div class="field">
+              <label>Password</label>
+              <input id="fld-pwd" type="password" placeholder="${isSignup ? 'At least 8 characters' : '••••••••'}" autocomplete="${isSignup?'new-password':'current-password'}"/>
+            </div>
+            <button class="btn btn-primary" id="auth-submit">${isSignup ? 'Create Account' : 'Sign In'}</button>
+            <div class="toggle-link">
+              ${isSignup ? "Already have an account? <button id='toggle-form'>Sign in</button>" : "New to Family Bank? <button id='toggle-form'>Open an account</button>"}
+            </div>
+          ` : `
+            <h2>Kid sign-in</h2>
+            <p class="sub">Enter your name and PIN to check your account.</p>
+            <div class="field">
+              <label>Your Name</label>
+              <input id="fld-kidname" type="text" placeholder="First name" autocomplete="off"/>
+            </div>
+            <div class="field">
+              <label>4-Digit PIN</label>
+              <div class="pin-input">
+                <input class="pin" maxlength="1" inputmode="numeric" pattern="[0-9]"/>
+                <input class="pin" maxlength="1" inputmode="numeric" pattern="[0-9]"/>
+                <input class="pin" maxlength="1" inputmode="numeric" pattern="[0-9]"/>
+                <input class="pin" maxlength="1" inputmode="numeric" pattern="[0-9]"/>
+              </div>
+            </div>
+            <div class="field" style="margin-top:8px">
+              <label>Parent's Email</label>
+              <input id="fld-parentemail" type="email" placeholder="parent@example.com" autocomplete="off"/>
+            </div>
+            <button class="btn btn-primary" id="kid-submit">Sign in</button>
+            <p class="sub" style="text-align:center;margin-top:10px;font-size:12px;">Ask a parent if you forgot your PIN.</p>
+          `}
+        </div>
+      </div>
+      `;
+    }
+
+    function wireLogin() {
+      document.querySelectorAll('.mode-tabs button').forEach(b => {
+        b.onclick = () => { state.authMode = b.dataset.mode; state.err=''; renderApp(); };
+      });
+
+      const toggle = document.getElementById('toggle-form');
+      if (toggle) toggle.onclick = () => { state.authForm = state.authForm==='login'?'signup':'login'; state.err=''; renderApp(); };
+
+      const submit = document.getElementById('auth-submit');
+      if (submit) {
+        submit.onclick = async () => {
+          const email = $('#fld-email').value.trim();
+          const pwd = $('#fld-pwd').value;
+          state.err = '';
+          if (!email || !pwd) { state.err = 'Please enter email and password.'; renderApp(); return; }
+          try {
+            if (state.authForm === 'signup') {
+              if (pwd.length < 8) { state.err='Password must be at least 8 characters.'; renderApp(); return; }
+              const fam = $('#fld-family')?.value.trim() || 'Our Family';
+              await doParentSignup(email, pwd, fam);
+            } else {
+              await doParentLogin(email, pwd);
+            }
+          } catch (e) {
+            state.err = humanizeAuthError(e); renderApp();
+          }
+        };
+      }
+
+      // PIN auto-advance
+      const pins = document.querySelectorAll('.pin');
+      pins.forEach((p, i) => {
+        p.oninput = () => {
+          p.value = p.value.replace(/\D/g,'').slice(0,1);
+          if (p.value && pins[i+1]) pins[i+1].focus();
+        };
+        p.onkeydown = (e) => {
+          if (e.key === 'Backspace' && !p.value && pins[i-1]) pins[i-1].focus();
+        };
+      });
+
+      const kidSubmit = document.getElementById('kid-submit');
+      if (kidSubmit) {
+        kidSubmit.onclick = async () => {
+          const name = $('#fld-kidname').value.trim();
+          const parentEmail = $('#fld-parentemail').value.trim();
+          const pin = Array.from(pins).map(p=>p.value).join('');
+          state.err = '';
+          if (!name || pin.length !== 4 || !parentEmail) { state.err = 'Fill in name, PIN, and parent\'s email.'; renderApp(); return; }
+          // Kid login approach: a parent must have signed in on this device first,
+          // which caches the family id in localStorage. We then anonymously auth
+          // to read the family's data (allowed by Firestore rules), and match
+          // the name+PIN to a child to grant a "kid session".
+          const cachedFamId = localStorage.getItem('fb_family_id');
+          const cachedFamEmail = localStorage.getItem('fb_family_email');
+          if (!cachedFamId || !cachedFamEmail) {
+            state.err = 'A parent needs to sign in on this device first. Once they have, you can sign in here anytime.';
+            renderApp(); return;
+          }
+          if (cachedFamEmail.toLowerCase() !== parentEmail.toLowerCase()) {
+            state.err = 'Parent email doesn\'t match the account set up on this device.';
+            renderApp(); return;
+          }
+          if (true) {
+            // Find child by name + pin via a one-time read using cached anonymous auth.
+            try {
+              // Try anonymous sign-in (must be enabled in Firebase Auth)
+              const { signInAnonymously } = await import("https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js");
+              if (!auth.currentUser) await signInAnonymously(auth);
+              const childrenSnap = await getDoc(doc(db, 'families', cachedFamId));
+              if (!childrenSnap.exists()) { state.err='Family not found.'; renderApp(); return; }
+              const childrenCol = collection(db, 'families', cachedFamId, 'children');
+              const { getDocs } = await import("https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js");
+              const qs = await getDocs(childrenCol);
+              const match = qs.docs.find(d => {
+                const data = d.data();
+                return data.name.toLowerCase() === name.toLowerCase() && data.pin === pin;
+              });
+              if (!match) { state.err='Name or PIN didn\'t match.'; renderApp(); return; }
+              state.family = { id: cachedFamId };
+              state.kidSession = { childId: match.id, name: match.data().name };
+              state.view = 'kid';
+              state.err = '';
+              // Subscribe to that child only
+              subscribeChildTx(match.id);
+              // Also subscribe to the child doc to get live balance
+              const unsubChild = onSnapshot(doc(db,'families',cachedFamId,'children',match.id), (snap) => {
+                if (snap.exists()) {
+                  state.children = [{ id: snap.id, ...snap.data() }];
+                  renderApp();
+                }
+              });
+              state.unsubs.push(unsubChild);
+              renderApp();
+            } catch (e) {
+              state.err = 'Sign-in failed: ' + (e.message || e); renderApp();
+            }
+          }
+        };
+      }
+    }
+
+    function humanizeAuthError(e) {
+      const c = e?.code || '';
+      if (c.includes('email-already-in-use')) return 'That email is already registered. Try signing in.';
+      if (c.includes('invalid-email')) return 'That email doesn\'t look valid.';
+      if (c.includes('wrong-password') || c.includes('invalid-credential') || c.includes('invalid-login-credentials')) return 'Email or password incorrect.';
+      if (c.includes('user-not-found')) return 'No account with that email.';
+      if (c.includes('weak-password')) return 'Password too weak (minimum 6 characters).';
+      if (c.includes('network')) return 'Network error. Check your connection.';
+      return e?.message || 'Something went wrong.';
+    }
+
+    // ----- DASHBOARD -----
+    function renderDashboard() {
+      const total = state.children.reduce((s,c) => s + (Number(c.balance)||0), 0);
+      const t = fmt(total);
+      const txCount = Object.values(state.transactions).reduce((s,arr) => s + (Array.isArray(arr)?arr.length:0), 0);
+      const interestEligible = state.children.some(c => c.interestRate > 0 && c.balance > 0);
+
+      return `
+        <div class="app">
+          <div class="header">
+            <div class="greet">
+              <small>${escapeHtml(state.family?.name || 'Family Bank')}</small>
+              Good ${greetingTime()}
+            </div>
+            <button class="icon-btn" id="btn-settings" aria-label="Settings">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            </button>
+          </div>
+
+          <div class="total-card">
+            <div class="label">Total Balance</div>
+            <div class="amount">${t.whole}<span class="cents">${t.cents}</span></div>
+            <div class="meta">
+              <div><b>${state.children.length}</b> ${state.children.length===1?'account':'accounts'}</div>
+              <div><b>${txCount}</b> transactions</div>
+              ${interestEligible ? `<div><b>•</b> earning interest</div>` : ''}
+            </div>
+          </div>
+
+          ${state.requests.length ? `
+            <div class="section-head"><h3>Pending Requests</h3></div>
+            ${state.requests.map(r => `
+              <div class="req-card">
+                <div class="top">
+                  <div class="name">${escapeHtml(r.childName)} wants to withdraw</div>
+                  <div class="amt">${fmt(r.amount).full}</div>
+                </div>
+                ${r.note ? `<div class="note">"${escapeHtml(r.note)}"</div>` : ''}
+                <div class="req-actions">
+                  <button class="approve" data-approve="${r.id}">Approve</button>
+                  <button class="deny" data-deny="${r.id}">Deny</button>
+                </div>
+              </div>
+            `).join('')}
+          ` : ''}
+
+          <div class="section-head">
+            <h3>Accounts</h3>
+            ${interestEligible ? `<button class="toggle-link" style="background:none;border:none;color:var(--green-deep);font-weight:600;font-size:13px;cursor:pointer" id="pay-interest">Pay interest →</button>` : ''}
+          </div>
+
+          ${state.children.length === 0 ? `
+            <div class="empty">
+              <h4>No accounts yet</h4>
+              <p>Add your first child to start tracking their savings.</p>
+              <button class="btn btn-primary" id="btn-add-kid" style="max-width:240px;margin:0 auto;">+ Add a Child</button>
+            </div>
+          ` : `
+            <div class="kids-list stagger">
+              ${state.children.map((c, i) => {
+                const b = fmt(c.balance);
+                return `
+                <button class="kid-card" data-child="${c.id}">
+                  <div class="avatar ${c.color||''}">${escapeHtml(initials(c.name))}</div>
+                  <div class="kid-info">
+                    <div class="name">${escapeHtml(c.name)}</div>
+                    <div class="sub">${(state.transactions[c.id]||[]).length} transactions${c.allowance?.amount ? ` • ${fmt(c.allowance.amount).full} ${c.allowance.freq}` : ''}</div>
+                  </div>
+                  <div>
+                    <div class="kid-amount ${(c.balance||0)<0?'negative':''}">${b.signed}</div>
+                  </div>
+                  <span class="kid-chev">›</span>
+                </button>
+              `;}).join('')}
+            </div>
+          `}
+
+          <button class="fab" id="fab" aria-label="Add transaction">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          </button>
+        </div>
+        ${renderModal()}
+      `;
+    }
+
+    function wireDashboard() {
+      const settingsBtn = $('#btn-settings');
+      if (settingsBtn) settingsBtn.onclick = () => { state.view='settings'; renderApp(); };
+
+      document.querySelectorAll('[data-child]').forEach(el => {
+        el.onclick = () => { state.selectedChildId = el.dataset.child; state.view='child'; renderApp(); };
+      });
+      const fab = $('#fab');
+      if (fab) fab.onclick = () => {
+        if (state.children.length === 0) { state.modal = 'addKid'; renderApp(); }
+        else { state.modal = 'addTx'; state.modalCtx = {}; renderApp(); }
+      };
+      const addKid = $('#btn-add-kid');
+      if (addKid) addKid.onclick = () => { state.modal='addKid'; renderApp(); };
+
+      const payInt = $('#pay-interest');
+      if (payInt) payInt.onclick = async () => {
+        if (confirm('Pay interest to all accounts now?')) await payInterestAll();
+      };
+
+      document.querySelectorAll('[data-approve]').forEach(b => b.onclick = () => decideRequest(b.dataset.approve, true));
+      document.querySelectorAll('[data-deny]').forEach(b => b.onclick = () => decideRequest(b.dataset.deny, false));
+
+      wireModal();
+    }
+
+    function greetingTime() {
+      const h = new Date().getHours();
+      if (h < 12) return 'morning';
+      if (h < 18) return 'afternoon';
+      return 'evening';
+    }
+
+    // ----- CHILD DETAIL -----
+    function renderChildDetail() {
+      const c = state.children.find(x => x.id === state.selectedChildId);
+      if (!c) { state.view='dashboard'; return ''; }
+      const txs = state.transactions[c.id] || [];
+      const goals = state.goals[c.id] || [];
+      const b = fmt(c.balance);
+
+      const monthEarn = txs
+        .filter(t => t.delta > 0 && t.createdAt && (Date.now() - (t.createdAt.toDate ? t.createdAt.toDate() : new Date(t.createdAt)).getTime()) < 30*86400000)
+        .reduce((s,t)=>s+t.delta,0);
+      const monthSpend = txs
+        .filter(t => t.delta < 0 && t.createdAt && (Date.now() - (t.createdAt.toDate ? t.createdAt.toDate() : new Date(t.createdAt)).getTime()) < 30*86400000)
+        .reduce((s,t)=>s+Math.abs(t.delta),0);
+
+      return `
+        <div class="app">
+          <button class="back-link" id="back">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+            All Accounts
+          </button>
+
+          <div class="detail-header">
+            <div class="avatar ${c.color||''}">${escapeHtml(initials(c.name))}</div>
+            <div>
+              <h2>${escapeHtml(c.name)}</h2>
+              <div class="sub">Account •••• ${c.id.slice(-4).toUpperCase()}</div>
+            </div>
+            <button class="icon-btn" id="edit-kid" style="margin-left:auto" aria-label="Edit">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
+            </button>
+          </div>
+
+          <div class="balance-feature">
+            <div class="lbl">Current Balance</div>
+            <div class="val ${(c.balance||0)<0?'negative':''}">${b.signed}</div>
+            ${c.interestRate ? `<div class="interest">${c.interestRate}% interest</div>` : ''}
+            <div class="meta" style="display:flex;gap:16px;margin-top:14px;font-size:13px;color:var(--muted);">
+              <div><span style="color:var(--green-deep);font-weight:600">+${fmt(monthEarn).full}</span> in</div>
+              <div><span style="color:var(--red);font-weight:600">−${fmt(monthSpend).full}</span> out</div>
+              <div style="margin-left:auto;font-size:11px;letter-spacing:.1em;text-transform:uppercase;">Last 30 days</div>
+            </div>
+          </div>
+
+          <div class="section-head">
+            <h3>Savings Goals</h3>
+            <button class="toggle-link" style="background:none;border:none;color:var(--green-deep);font-weight:600;font-size:13px;cursor:pointer" id="add-goal">+ Goal</button>
+          </div>
+          ${goals.length === 0 ? `
+            <div class="empty" style="padding:18px"><p style="margin:0">No savings goals yet.</p></div>
+          ` : goals.map(g => {
+            const pct = Math.min(100, ((c.balance||0) / g.target) * 100);
+            return `
+            <div class="goal-card">
+              <div class="top">
+                <div class="name">${escapeHtml(g.name)}</div>
+                <div class="amt">${fmt(g.target).full}</div>
+              </div>
+              <div class="goal-bar"><div style="width:${Math.max(0,pct)}%"></div></div>
+              <div class="pct">
+                <span>${pct.toFixed(0)}% saved</span>
+                <button data-delgoal="${g.id}" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;">Remove</button>
+              </div>
+            </div>`;
+          }).join('')}
+
+          <div class="section-head"><h3>Transactions</h3></div>
+          ${txs.length === 0 ? `
+            <div class="empty"><p>No transactions yet.</p></div>
+          ` : `
+          <div class="card" style="padding:6px 18px;">
+            <div class="tx-list">
+            ${txs.map(t => {
+              const cat = CATEGORIES.find(x=>x.id===t.category) || { ico: '•' };
+              return `
+              <div class="tx-item">
+                <div class="tx-icon ${t.delta<0?'out':(t.category==='interest'?'int':'')}">${cat.ico}</div>
+                <div class="tx-body">
+                  <div class="note">${escapeHtml(t.note || (t.delta>0?'Deposit':'Withdrawal'))}</div>
+                  <div class="meta">${formatDate(t.createdAt)} • Balance ${fmt(t.balanceAfter).full}</div>
+                </div>
+                <div class="tx-amt ${t.delta<0?'out':''}">${t.delta<0?'−':'+'}${fmt(t.amount).full}</div>
+              </div>`;
+            }).join('')}
+            </div>
+          </div>
+          `}
+
+          <button class="fab" id="fab" aria-label="Add transaction">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          </button>
+        </div>
+        ${renderModal()}
+      `;
+    }
+
+    function wireChildDetail() {
+      $('#back').onclick = () => { state.view='dashboard'; state.selectedChildId=null; renderApp(); };
+      $('#fab').onclick = () => { state.modal='addTx'; state.modalCtx={childId: state.selectedChildId}; renderApp(); };
+      $('#edit-kid').onclick = () => { state.modal='editKid'; state.modalCtx={childId: state.selectedChildId}; renderApp(); };
+      $('#add-goal').onclick = () => { state.modal='addGoal'; state.modalCtx={childId: state.selectedChildId}; renderApp(); };
+      document.querySelectorAll('[data-delgoal]').forEach(b => b.onclick = () => {
+        if (confirm('Remove this goal?')) deleteGoal(state.selectedChildId, b.dataset.delgoal);
+      });
+      wireModal();
+    }
+
+    // ----- KID VIEW -----
+    function renderKidView() {
+      const c = state.children.find(x => x.id === state.kidSession.childId) || { name: state.kidSession.name, balance: 0 };
+      const txs = state.transactions[c.id] || [];
+      const goals = state.goals[c.id] || [];
+      const b = fmt(c.balance);
+      const recent = txs.slice(0, 5);
+
+      return `
+        <div class="app kid-view">
+          <div class="header">
+            <div class="greet">
+              <small>${escapeHtml(state.family?.name || 'Family Bank')}</small>
+              Hi, ${escapeHtml(c.name)}
+            </div>
+            <button class="icon-btn" id="kid-logout" aria-label="Sign out">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            </button>
+          </div>
+
+          <div class="total-card">
+            <div class="label">Your Balance</div>
+            <div class="amount kid-balance-big">${b.whole}<span class="cents">${b.cents}</span></div>
+            <div class="meta">
+              <div>${txs.length} ${txs.length===1?'transaction':'transactions'}</div>
+              ${c.interestRate ? `<div><b>${c.interestRate}%</b> interest</div>` : ''}
+            </div>
+          </div>
+
+          <button class="btn btn-primary" id="kid-request" style="margin-bottom:14px;">Request a withdrawal</button>
+
+          ${goals.length ? `
+          <div class="section-head"><h3>Your Goals</h3></div>
+          ${goals.map(g => {
+            const pct = Math.min(100, ((c.balance||0)/g.target)*100);
+            return `
+            <div class="goal-card">
+              <div class="top"><div class="name">${escapeHtml(g.name)}</div><div class="amt">${fmt(g.target).full}</div></div>
+              <div class="goal-bar"><div style="width:${Math.max(0,pct)}%"></div></div>
+              <div class="pct"><span>${pct.toFixed(0)}% saved · ${fmt(Math.max(0, g.target - (c.balance||0))).full} to go</span></div>
+            </div>`;
+          }).join('')}
+          ` : ''}
+
+          <div class="section-head"><h3>Recent Activity</h3></div>
+          ${recent.length === 0 ? `<div class="empty"><p>No activity yet.</p></div>` : `
+          <div class="card" style="padding:6px 18px;">
+            <div class="tx-list">
+            ${recent.map(t => {
+              const cat = CATEGORIES.find(x=>x.id===t.category) || { ico: '•' };
+              return `
+              <div class="tx-item">
+                <div class="tx-icon ${t.delta<0?'out':(t.category==='interest'?'int':'')}">${cat.ico}</div>
+                <div class="tx-body">
+                  <div class="note">${escapeHtml(t.note || (t.delta>0?'Deposit':'Withdrawal'))}</div>
+                  <div class="meta">${formatDate(t.createdAt)}</div>
+                </div>
+                <div class="tx-amt ${t.delta<0?'out':''}">${t.delta<0?'−':'+'}${fmt(t.amount).full}</div>
+              </div>`;
+            }).join('')}
+            </div>
+          </div>`}
+        </div>
+        ${renderModal()}
+      `;
+    }
+
+    function wireKid() {
+      $('#kid-logout').onclick = () => {
+        teardownSubs();
+        state.kidSession = null; state.view='login'; state.authMode='kid'; renderApp();
+      };
+      $('#kid-request').onclick = () => { state.modal = 'kidRequest'; renderApp(); };
+      wireModal();
+    }
+
+    // ----- SETTINGS -----
+    function renderSettings() {
+      return `
+        <div class="app">
+          <button class="back-link" id="back">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+            Dashboard
+          </button>
+
+          <div class="detail-header">
+            <h2>Settings</h2>
+          </div>
+
+          <div class="section-head"><h3>Family</h3></div>
+          <div class="list-block">
+            <div class="list-item">
+              <div class="ico">👨‍👩‍👧</div>
+              <div class="label">Family name</div>
+              <div class="val">${escapeHtml(state.family?.name || '—')}</div>
+            </div>
+            <div class="list-item">
+              <div class="ico">✉️</div>
+              <div class="label">Signed in as</div>
+              <div class="val">${escapeHtml(state.user?.email||'')}</div>
+            </div>
+          </div>
+
+          <div class="section-head"><h3>Children</h3></div>
+          <div class="list-block">
+            ${state.children.length === 0 ? `<div class="list-item"><div class="label" style="color:var(--muted)">No children yet</div></div>` :
+              state.children.map(c => `
+              <div class="list-item">
+                <div class="avatar ${c.color||''}" style="width:36px;height:36px;font-size:14px;">${escapeHtml(initials(c.name))}</div>
+                <div class="label">${escapeHtml(c.name)}</div>
+                <button data-editkid="${c.id}" style="background:none;border:none;color:var(--green-deep);font-weight:600;font-size:13px;cursor:pointer">Edit</button>
+              </div>`).join('')
+            }
+          </div>
+          <button class="btn btn-ghost" id="add-kid-btn" style="margin-bottom:18px;">+ Add a child</button>
+
+          <div class="section-head"><h3>Session</h3></div>
+          <div class="list-block">
+            <button class="list-item" style="width:100%;text-align:left;" id="signout">
+              <div class="ico" style="background:#f5dada;color:var(--red);">⏏</div>
+              <div class="label">Sign out</div>
+            </button>
+          </div>
+
+          <p class="sub" style="text-align:center;color:var(--muted);font-size:12px;margin-top:20px;">
+            Tip: Kids can sign in on the same device once you've signed in here.
+          </p>
+        </div>
+        ${renderModal()}
+      `;
+    }
+
+    function wireSettings() {
+      $('#back').onclick = () => { state.view='dashboard'; renderApp(); };
+      $('#signout').onclick = () => { if (confirm('Sign out?')) doSignOut(); };
+      $('#add-kid-btn').onclick = () => { state.modal='addKid'; renderApp(); };
+      document.querySelectorAll('[data-editkid]').forEach(b => b.onclick = () => {
+        state.modal='editKid'; state.modalCtx={childId: b.dataset.editkid}; renderApp();
+      });
+      wireModal();
+    }
+
+    // ----- MODAL -----
+    function renderModal() {
+      if (!state.modal) return '';
+      const ctx = state.modalCtx || {};
+      if (state.modal === 'addTx') {
+        const selectedChild = ctx.childId || state.children[0]?.id;
+        const type = ctx.type || 'deposit';
+        const cat = ctx.category || (type==='deposit' ? 'allowance' : 'toy');
+        const cats = CATEGORIES.filter(c => c.type === type || c.type === 'both');
+        return `
+          <div class="modal-bg" id="modal-bg">
+            <div class="modal" onclick="event.stopPropagation()">
+              <div class="grip"></div>
+              <div class="modal-head">
+                <h2>New Transaction</h2>
+                <button class="close-btn" id="close">✕</button>
+              </div>
+              ${state.err ? `<div class="err">${escapeHtml(state.err)}</div>` : ''}
+              <div class="type-toggle">
+                <button class="${type==='deposit'?'active deposit':''}" data-type="deposit">↓ Deposit</button>
+                <button class="${type==='withdraw'?'active withdraw':''}" data-type="withdraw">↑ Withdraw</button>
+              </div>
+              <div class="amount-input">
+                <div class="pre">$</div>
+                <input type="text" id="tx-amt" inputmode="decimal" placeholder="0.00" autocomplete="off"/>
+              </div>
+              <div class="field">
+                <label>Account</label>
+                <select id="tx-child">
+                  ${state.children.map(c => `<option value="${c.id}" ${c.id===selectedChild?'selected':''}>${escapeHtml(c.name)} (${fmt(c.balance).full})</option>`).join('')}
+                </select>
+              </div>
+              <div class="field">
+                <label>Category</label>
+                <div class="cat-grid">
+                  ${cats.map(c => `<button class="cat-pill ${c.id===cat?'active':''}" data-cat="${c.id}"><span class="ico">${c.ico}</span><span>${c.label}</span></button>`).join('')}
+                </div>
+              </div>
+              <div class="field">
+                <label>Note</label>
+                <input type="text" id="tx-note" placeholder="e.g., Birthday money from Grandma" maxlength="80"/>
+              </div>
+              <button class="btn btn-primary" id="tx-submit">Save Transaction</button>
+            </div>
+          </div>
+        `;
+      }
+      if (state.modal === 'addKid') {
+        return `
+          <div class="modal-bg" id="modal-bg">
+            <div class="modal" onclick="event.stopPropagation()">
+              <div class="grip"></div>
+              <div class="modal-head">
+                <h2>Add a Child</h2>
+                <button class="close-btn" id="close">✕</button>
+              </div>
+              ${state.err ? `<div class="err">${escapeHtml(state.err)}</div>` : ''}
+              <div class="field">
+                <label>First Name</label>
+                <input type="text" id="kid-name" placeholder="e.g., Sam" autocomplete="off" maxlength="20"/>
+              </div>
+              <div class="field">
+                <label>4-Digit PIN (for kid login)</label>
+                <input type="text" id="kid-pin" inputmode="numeric" maxlength="4" placeholder="••••" style="letter-spacing:.5em;text-align:center;font-size:22px;font-family:'Fraunces',serif;"/>
+              </div>
+              <div class="field">
+                <label>Avatar Color</label>
+                <div style="display:flex;gap:8px;">
+                  ${AVATAR_COLORS.map(col => `<button class="avatar ${col} avatar-pick" data-col="${col}" style="width:42px;height:42px;cursor:pointer;outline-offset:3px;outline:${col===(ctx.color||'')?'2px solid var(--green-deep)':'2px solid transparent'};">${col?'•':'A'}</button>`).join('')}
+                </div>
+              </div>
+              <button class="btn btn-primary" id="kid-save">Add Child</button>
+            </div>
+          </div>
+        `;
+      }
+      if (state.modal === 'editKid') {
+        const c = state.children.find(x => x.id === ctx.childId);
+        if (!c) return '';
+        return `
+          <div class="modal-bg" id="modal-bg">
+            <div class="modal" onclick="event.stopPropagation()">
+              <div class="grip"></div>
+              <div class="modal-head">
+                <h2>${escapeHtml(c.name)}'s Account</h2>
+                <button class="close-btn" id="close">✕</button>
+              </div>
+              <div class="field">
+                <label>Name</label>
+                <input type="text" id="ek-name" value="${escapeHtml(c.name)}" maxlength="20"/>
+              </div>
+              <div class="field">
+                <label>4-Digit PIN</label>
+                <input type="text" id="ek-pin" inputmode="numeric" maxlength="4" value="${escapeHtml(c.pin||'')}" style="letter-spacing:.5em;text-align:center;font-size:22px;font-family:'Fraunces',serif;"/>
+              </div>
+              <div class="field">
+                <label>Interest Rate (% per month, on positive balance)</label>
+                <input type="number" id="ek-rate" min="0" max="20" step="0.1" value="${c.interestRate||0}" placeholder="0"/>
+              </div>
+              <div class="field">
+                <label>Recurring Allowance</label>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                  <input type="number" id="ek-allow-amt" min="0" step="0.01" placeholder="Amount" value="${c.allowance?.amount||''}"/>
+                  <select id="ek-allow-freq">
+                    <option value="" ${!c.allowance?'selected':''}>None</option>
+                    <option value="weekly" ${c.allowance?.freq==='weekly'?'selected':''}>Weekly</option>
+                    <option value="biweekly" ${c.allowance?.freq==='biweekly'?'selected':''}>Biweekly</option>
+                    <option value="monthly" ${c.allowance?.freq==='monthly'?'selected':''}>Monthly</option>
+                  </select>
+                </div>
+              </div>
+              <button class="btn btn-primary" id="ek-save">Save Changes</button>
+              <button class="btn btn-danger" id="ek-del" style="margin-top:10px;">Delete Account</button>
+            </div>
+          </div>
+        `;
+      }
+      if (state.modal === 'addGoal') {
+        return `
+          <div class="modal-bg" id="modal-bg">
+            <div class="modal" onclick="event.stopPropagation()">
+              <div class="grip"></div>
+              <div class="modal-head">
+                <h2>New Savings Goal</h2>
+                <button class="close-btn" id="close">✕</button>
+              </div>
+              <div class="field">
+                <label>What are you saving for?</label>
+                <input type="text" id="g-name" placeholder="e.g., New bike" maxlength="40"/>
+              </div>
+              <div class="field">
+                <label>Target Amount</label>
+                <div class="amount-input"><div class="pre">$</div><input type="text" id="g-amt" inputmode="decimal" placeholder="0.00"/></div>
+              </div>
+              <button class="btn btn-primary" id="g-save">Add Goal</button>
+            </div>
+          </div>
+        `;
+      }
+      if (state.modal === 'kidRequest') {
+        return `
+          <div class="modal-bg" id="modal-bg">
+            <div class="modal" onclick="event.stopPropagation()">
+              <div class="grip"></div>
+              <div class="modal-head">
+                <h2>Request a Withdrawal</h2>
+                <button class="close-btn" id="close">✕</button>
+              </div>
+              <p class="sub">A parent will approve or deny your request.</p>
+              <div class="amount-input">
+                <div class="pre">$</div>
+                <input type="text" id="kr-amt" inputmode="decimal" placeholder="0.00"/>
+              </div>
+              <div class="field">
+                <label>What's it for?</label>
+                <input type="text" id="kr-note" placeholder="e.g., LEGO set" maxlength="60"/>
+              </div>
+              <button class="btn btn-primary" id="kr-send">Send Request</button>
+            </div>
+          </div>
+        `;
+      }
+      return '';
+    }
+
+    function wireModal() {
+      const bg = $('#modal-bg');
+      if (!bg) return;
+      bg.onclick = () => { state.modal = null; state.modalCtx={}; state.err=''; renderApp(); };
+      const close = $('#close');
+      if (close) close.onclick = () => { state.modal = null; state.modalCtx={}; state.err=''; renderApp(); };
+
+      // addTx
+      if (state.modal === 'addTx') {
+        document.querySelectorAll('[data-type]').forEach(b => b.onclick = () => {
+          state.modalCtx.type = b.dataset.type;
+          // pick first cat of new type
+          const cats = CATEGORIES.filter(c => c.type === state.modalCtx.type || c.type === 'both');
+          state.modalCtx.category = cats[0].id;
+          // preserve fields
+          state.modalCtx.amt = $('#tx-amt').value;
+          state.modalCtx.note = $('#tx-note').value;
+          state.modalCtx.childId = $('#tx-child').value;
+          renderApp();
+        });
+        document.querySelectorAll('[data-cat]').forEach(b => b.onclick = () => {
+          state.modalCtx.category = b.dataset.cat;
+          state.modalCtx.amt = $('#tx-amt').value;
+          state.modalCtx.note = $('#tx-note').value;
+          state.modalCtx.childId = $('#tx-child').value;
+          state.modalCtx.type = state.modalCtx.type || 'deposit';
+          renderApp();
+        });
+        if (state.modalCtx.amt) $('#tx-amt').value = state.modalCtx.amt;
+        if (state.modalCtx.note) $('#tx-note').value = state.modalCtx.note;
+        $('#tx-submit').onclick = async () => {
+          const amt = parseFloat($('#tx-amt').value);
+          const childId = $('#tx-child').value;
+          const note = $('#tx-note').value.trim();
+          const type = state.modalCtx.type || 'deposit';
+          const category = state.modalCtx.category || 'other';
+          if (!amt || amt <= 0) { state.err='Enter an amount.'; renderApp(); return; }
+          if (!childId) { state.err='Choose an account.'; renderApp(); return; }
+          await addTransaction({ childId, amount: amt, type, note, category });
+          state.modal = null; state.modalCtx={}; state.err=''; renderApp();
+        };
+      }
+
+      if (state.modal === 'addKid') {
+        document.querySelectorAll('.avatar-pick').forEach(b => b.onclick = () => {
+          state.modalCtx.color = b.dataset.col;
+          state.modalCtx.name = $('#kid-name').value;
+          state.modalCtx.pin = $('#kid-pin').value;
+          renderApp();
+        });
+        if (state.modalCtx.name) $('#kid-name').value = state.modalCtx.name;
+        if (state.modalCtx.pin) $('#kid-pin').value = state.modalCtx.pin;
+        $('#kid-save').onclick = async () => {
+          const name = $('#kid-name').value.trim();
+          const pin = $('#kid-pin').value.replace(/\D/g,'').slice(0,4);
+          if (!name) { state.err='Enter a name.'; renderApp(); return; }
+          if (pin.length !== 4) { state.err='PIN must be 4 digits.'; renderApp(); return; }
+          await addChild({ name, pin, color: state.modalCtx.color || '' });
+          state.modal=null; state.modalCtx={}; state.err=''; renderApp();
+        };
+      }
+
+      if (state.modal === 'editKid') {
+        $('#ek-save').onclick = async () => {
+          const name = $('#ek-name').value.trim();
+          const pin = $('#ek-pin').value.replace(/\D/g,'').slice(0,4);
+          const rate = parseFloat($('#ek-rate').value) || 0;
+          const allowAmt = parseFloat($('#ek-allow-amt').value);
+          const allowFreq = $('#ek-allow-freq').value;
+          if (!name) { state.err='Name required.'; renderApp(); return; }
+          if (pin.length !== 4) { state.err='PIN must be 4 digits.'; renderApp(); return; }
+          const patch = { name, pin, interestRate: rate };
+          if (allowFreq && allowAmt > 0) {
+            const existing = state.children.find(c=>c.id===state.modalCtx.childId)?.allowance;
+            patch.allowance = { amount: allowAmt, freq: allowFreq, lastPaid: existing?.lastPaid || null };
+          } else {
+            patch.allowance = null;
+          }
+          await updateChild(state.modalCtx.childId, patch);
+          state.modal=null; state.modalCtx={}; state.err=''; renderApp();
+        };
+        $('#ek-del').onclick = async () => {
+          if (confirm('Delete this account? Transactions will remain in the database but be hidden.')) {
+            await deleteChild(state.modalCtx.childId);
+            state.modal=null; state.modalCtx={}; state.view='dashboard'; state.selectedChildId=null; renderApp();
+          }
+        };
+      }
+
+      if (state.modal === 'addGoal') {
+        $('#g-save').onclick = async () => {
+          const name = $('#g-name').value.trim();
+          const amt = parseFloat($('#g-amt').value);
+          if (!name || !amt || amt <= 0) { state.err='Fill in both fields.'; renderApp(); return; }
+          await addGoal({ childId: state.modalCtx.childId, name, target: amt });
+          state.modal=null; state.modalCtx={}; renderApp();
+        };
+      }
+
+      if (state.modal === 'kidRequest') {
+        $('#kr-send').onclick = async () => {
+          const amt = parseFloat($('#kr-amt').value);
+          const note = $('#kr-note').value.trim();
+          if (!amt || amt <= 0) { state.err='Enter an amount.'; renderApp(); return; }
+          await submitRequest({ childId: state.kidSession.childId, amount: amt, note });
+          state.modal=null; renderApp();
+          alert('Request sent! A parent will review it.');
+        };
+      }
+    }
+
+    // ============= INIT =============
+    if (isFirebaseConfigured) {
+      onAuthStateChanged(auth, async (user) => {
+        if (user && !user.isAnonymous) {
+          state.user = user;
+          state.view = 'dashboard';
+          // Cache for kid logins on this device
+          localStorage.setItem('fb_family_id', user.uid);
+          localStorage.setItem('fb_family_email', user.email || '');
+          await loadFamilyAndSubscribe(user);
+          renderApp();
+        } else if (!user) {
+          state.user = null;
+          if (!state.kidSession) {
+            state.view = 'login';
+          }
+          renderApp();
+        }
+        // anonymous user (kid auth) is handled by kid sign-in flow directly
+      });
+    } else {
+      renderApp();
+    }
+
+    // Make functions available for debug
+    window.__familyBank = { state };
+  </script>
+</body>
+</html>
