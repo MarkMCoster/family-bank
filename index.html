@@ -1096,28 +1096,42 @@
       }
     }
 
+   let _allowanceChecking = false;
+    let _allowanceLastRun = 0;
+
     async function runAllowanceCheck() {
-      // Check each child for due allowance.
-      const now = new Date();
-      for (const c of state.children) {
-        if (!c.allowance || !c.allowance.amount) continue;
-        const { amount, freq, lastPaid } = c.allowance;
-        const last = lastPaid?.toDate ? lastPaid.toDate() : (lastPaid ? new Date(lastPaid) : null);
-        const intervalDays = freq === 'weekly' ? 7 : freq === 'biweekly' ? 14 : 30;
-        const due = !last || ((now - last) / 86400000 >= intervalDays);
-        if (due) {
-          await addTransaction({
-            childId: c.id,
-            amount: Number(amount),
-            type: 'deposit',
-            note: `${freq.charAt(0).toUpperCase()+freq.slice(1)} allowance`,
-            category: 'allowance'
-          });
-          await updateChild(c.id, { allowance: { ...c.allowance, lastPaid: serverTimestamp() } });
+      if (_allowanceChecking) return;
+      if (Date.now() - _allowanceLastRun < 60000) return;
+      _allowanceChecking = true;
+      _allowanceLastRun = Date.now();
+
+      try {
+        const now = new Date();
+        for (const c of state.children) {
+          if (!c.allowance || !c.allowance.amount) continue;
+          const { amount, freq, lastPaid } = c.allowance;
+          const last = typeof lastPaid === 'number'
+            ? new Date(lastPaid)
+            : (lastPaid?.toDate ? lastPaid.toDate() : (lastPaid ? new Date(lastPaid) : null));
+          const intervalDays = freq === 'weekly' ? 7 : freq === 'biweekly' ? 14 : 30;
+          const due = !last || ((now - last) / 86400000 >= intervalDays);
+          if (due) {
+            await updateChild(c.id, {
+              allowance: { ...c.allowance, lastPaid: Date.now() }
+            });
+            await addTransaction({
+              childId: c.id,
+              amount: Number(amount),
+              type: 'deposit',
+              note: `${freq.charAt(0).toUpperCase()+freq.slice(1)} allowance`,
+              category: 'allowance'
+            });
+          }
         }
+      } finally {
+        _allowanceChecking = false;
       }
     }
-
     async function submitRequest({ childId, amount, note }) {
       const col = collection(db, 'families', state.family.id, 'requests');
       await addDoc(col, {
@@ -1992,7 +2006,7 @@
           const patch = { name, pin, interestRate: rate };
           if (allowFreq && allowAmt > 0) {
             const existing = state.children.find(c=>c.id===state.modalCtx.childId)?.allowance;
-            patch.allowance = { amount: allowAmt, freq: allowFreq, lastPaid: existing?.lastPaid || null };
+            patch.allowance = { amount: allowAmt, freq: allowFreq, lastPaid: existing?.lastPaid || Date.now() };
           } else {
             patch.allowance = null;
           }
