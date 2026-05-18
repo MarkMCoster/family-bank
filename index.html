@@ -846,35 +846,61 @@
 
   <!-- Firebase via CDN modular SDK (v10.12) -->
   <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+    import { initializeApp, getApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
     import {
-      getAuth, onAuthStateChanged,
+      getAuth, onAuthStateChanged, initializeAuth, browserLocalPersistence,
       createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut
     } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
     import {
       getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc,
-      collection, addDoc, onSnapshot, query, orderBy, serverTimestamp, deleteField
+      collection, addDoc, getDocs, onSnapshot, query, where, orderBy, limit,
+      serverTimestamp, deleteField, writeBatch
     } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+    import { initializeAppCheck, ReCaptchaV3Provider }
+      from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app-check.js";
 
     // ===== FIREBASE CONFIG =====
     // PASTE YOUR FIREBASE CONFIG VALUES HERE (see SETUP.md for instructions)
     const firebaseConfig = {
-  apiKey: "AIzaSyAUxph-yh92J6pfWH61Ge5nICyPRwIphkE",
-  authDomain: "family-bank-5d3fc.firebaseapp.com",
-  projectId: "family-bank-5d3fc",
-  storageBucket: "family-bank-5d3fc.firebasestorage.app",
-  messagingSenderId: "830837637516",
-  appId: "1:830837637516:web:75b552dfd30636ee5496a9",
-  measurementId: "G-L4CHHP6R4R"
+      apiKey: "PASTE_API_KEY_HERE",
+      authDomain: "PASTE_AUTH_DOMAIN_HERE",
+      projectId: "PASTE_PROJECT_ID_HERE",
+      storageBucket: "PASTE_STORAGE_BUCKET_HERE",
+      messagingSenderId: "PASTE_SENDER_ID_HERE",
+      appId: "PASTE_APP_ID_HERE"
     };
+
+    // ===== APP CHECK (optional, recommended) =====
+    // After you set up reCAPTCHA v3 (see SETUP-PRODUCTION.md), paste your
+    // reCAPTCHA *site* key here. Leave as 'DISABLED' to skip App Check.
+    const RECAPTCHA_SITE_KEY = "DISABLED";
+
+    // ===== KID-AUTH NAMESPACE =====
+    // Kid accounts are created automatically as hidden Firebase users with
+    // emails of the form kid+{familyId}+{slug}@familybank.live. This must
+    // match the email domain you actually use; the value is cosmetic only.
+    const KID_EMAIL_DOMAIN = "kid.familybank.live";
 
     const isFirebaseConfigured = !firebaseConfig.apiKey.startsWith("PASTE_");
 
-    let app, auth, db;
+    let app, auth, db, secondaryApp, secondaryAuth;
     if (isFirebaseConfigured) {
       app = initializeApp(firebaseConfig);
+      // App Check
+      if (RECAPTCHA_SITE_KEY && RECAPTCHA_SITE_KEY !== "DISABLED") {
+        try {
+          initializeAppCheck(app, {
+            provider: new ReCaptchaV3Provider(RECAPTCHA_SITE_KEY),
+            isTokenAutoRefreshEnabled: true
+          });
+        } catch (e) { console.warn("App Check init failed:", e); }
+      }
       auth = getAuth(app);
       db = getFirestore(app);
+      // Secondary app instance used to create child Firebase users without
+      // affecting the parent's signed-in session.
+      secondaryApp = initializeApp(firebaseConfig, "secondary");
+      secondaryAuth = getAuth(secondaryApp);
     }
 
     // ============= STATE =============
@@ -936,6 +962,26 @@
       return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     }
 
+    // ============= KID AUTH HELPERS =============
+    // Each kid is a hidden Firebase user. Their email is deterministic:
+    //   kid+{familyId}+{slug}@{KID_EMAIL_DOMAIN}
+    // Their password is derived from family id + PIN via a one-way hash on
+    // the client. We never store the password in Firestore.
+    function nameSlug(name) {
+      return String(name||'').toLowerCase().normalize('NFKD').replace(/[^\w]+/g, '');
+    }
+    function kidEmail(familyId, name) {
+      return `kid+${familyId}+${nameSlug(name)}@${KID_EMAIL_DOMAIN}`;
+    }
+    async function derivePassword(familyId, name, pin) {
+      // Web Crypto SHA-256: NOT a real KDF, but combined with a long random
+      // family ID it gives a 64-char hex password Firebase Auth accepts, that
+      // cannot be reversed back to the PIN from the email alone.
+      const enc = new TextEncoder().encode(`fbk|${familyId}|${nameSlug(name)}|${pin}`);
+      const buf = await crypto.subtle.digest('SHA-256', enc);
+      return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+    }
+
     // ============= AUTH / DATA =============
     async function setupParent(user, familyName) {
       // Create family doc
@@ -944,18 +990,26 @@
         name: familyName || 'Our Family',
         ownerUid: user.uid,
         parents: [user.uid],
+        memberUids: [user.uid],       // parents + all kid uids (for rule checks)
+        kidIndex: {},                 // { nameSlug: kidUid } for kid sign-in lookup
         createdAt: serverTimestamp()
       });
     }
 
     async function loadFamilyAndSubscribe(user) {
-      // Try to find a family where user is in parents array.
-      // For simplicity, family doc id == owner uid.
+      // Family doc id == owner parent's uid.
       const familyRef = doc(db, 'families', user.uid);
       const snap = await getDoc(familyRef);
       if (!snap.exists()) {
         // First-time login: create empty family
         await setupParent(user, '');
+      } else {
+        // Migrate older family docs that pre-date the security upgrade
+        const d = snap.data();
+        const patch = {};
+        if (!Array.isArray(d.memberUids)) patch.memberUids = [user.uid, ...(d.parents||[])].filter((v,i,a)=>a.indexOf(v)===i);
+        if (!d.kidIndex) patch.kidIndex = {};
+        if (Object.keys(patch).length) await updateDoc(familyRef, patch);
       }
       const fSnap = await getDoc(familyRef);
       state.family = { id: fSnap.id, ...fSnap.data() };
@@ -979,6 +1033,24 @@
         renderApp();
       });
       state.unsubs.push(unsubReqs);
+    }
+
+    async function loadFamilyForKid(user, familyId, childId) {
+      // Kid signed in: only subscribe to their own child doc + tx + goals.
+      const childRef = doc(db, 'families', familyId, 'children', childId);
+      const unsubChild = onSnapshot(childRef, (snap) => {
+        if (snap.exists()) {
+          state.children = [{ id: snap.id, ...snap.data() }];
+          subscribeChildTx(childId);
+          renderApp();
+        }
+      });
+      state.unsubs.push(unsubChild);
+      // Also load family name for header
+      try {
+        const f = await getDoc(doc(db, 'families', familyId));
+        if (f.exists()) state.family = { id: f.id, name: f.data().name };
+      } catch (e) { /* rules may forbid; that's okay */ }
     }
 
     function subscribeChildTx(childId) {
@@ -1026,16 +1098,63 @@
     }
 
     async function addChild({ name, pin, color }) {
-      const childrenCol = collection(db, 'families', state.family.id, 'children');
-      await addDoc(childrenCol, {
+      const familyId = state.family.id;
+      const slug = nameSlug(name);
+      if (!slug) throw new Error('Name must contain letters or numbers.');
+
+      // Check duplicate slug in this family
+      if (state.family.kidIndex && state.family.kidIndex[slug]) {
+        throw new Error('A child with that name already exists in this family.');
+      }
+
+      // 1. Create a hidden Firebase user for the kid on the SECONDARY app
+      //    (so it doesn't sign out the parent).
+      const email = kidEmail(familyId, name);
+      const pwd = await derivePassword(familyId, name, pin);
+      let kidUid;
+      try {
+        const cred = await createUserWithEmailAndPassword(secondaryAuth, email, pwd);
+        kidUid = cred.user.uid;
+        await signOut(secondaryAuth); // don't leave secondary signed in
+      } catch (e) {
+        // If the user already exists (re-adding a previously-deleted kid),
+        // try signing in to recover the UID.
+        if (e.code === 'auth/email-already-in-use') {
+          try {
+            const cred = await signInWithEmailAndPassword(secondaryAuth, email, pwd);
+            kidUid = cred.user.uid;
+            await signOut(secondaryAuth);
+          } catch (e2) {
+            throw new Error('A kid with that name was used before with a different PIN. Pick a different name, or contact support to reset.');
+          }
+        } else {
+          throw e;
+        }
+      }
+
+      // 2. Create the child doc with kidUid
+      const childrenCol = collection(db, 'families', familyId, 'children');
+      const childRef = await addDoc(childrenCol, {
         name,
-        pin,
+        nameSlug: slug,
+        kidUid,
         color: color || '',
         balance: 0,
         interestRate: 0,
         allowance: null,
         createdAt: serverTimestamp()
       });
+
+      // 3. Update family memberUids + kidIndex
+      const famRef = doc(db, 'families', familyId);
+      const newMembers = Array.from(new Set([...(state.family.memberUids||[]), kidUid]));
+      const newIndex = { ...(state.family.kidIndex||{}), [slug]: kidUid };
+      await updateDoc(famRef, { memberUids: newMembers, kidIndex: newIndex });
+      // Refresh local state.family so subsequent ops see the new arrays
+      state.family.memberUids = newMembers;
+      state.family.kidIndex = newIndex;
+
+      return childRef.id;
     }
 
     async function updateChild(childId, patch) {
@@ -1043,10 +1162,37 @@
       await updateDoc(ref, patch);
     }
 
+    async function rotateChildPin(childId, newPin) {
+      // Changing a PIN means re-creating the hidden auth user with a new
+      // password. Easiest path: delete the old hidden user (requires recent
+      // sign-in, which we can't do here from the secondary app reliably) OR
+      // just create a new user with a tweaked email if name unchanged.
+      // For simplicity we update by signing in with old creds and updating
+      // password. If old PIN unknown we can't do this; in that case advise
+      // the user to delete+recreate the child.
+      throw new Error('PIN rotation must be done via Delete + Re-add child.');
+    }
+
     async function deleteChild(childId) {
-      // delete subcollection docs would be costly; we just delete the child doc.
-      // For full cleanup the user can do it from the firebase console, but the child is hidden from the UI.
-      const ref = doc(db, 'families', state.family.id, 'children', childId);
+      const child = state.children.find(c => c.id === childId);
+      const familyId = state.family.id;
+
+      // Remove from family kidIndex / memberUids (preserve other kids)
+      if (child) {
+        const newMembers = (state.family.memberUids||[]).filter(u => u !== child.kidUid);
+        const newIndex = { ...(state.family.kidIndex||{}) };
+        if (child.nameSlug) delete newIndex[child.nameSlug];
+        const famRef = doc(db, 'families', familyId);
+        await updateDoc(famRef, { memberUids: newMembers, kidIndex: newIndex });
+        state.family.memberUids = newMembers;
+        state.family.kidIndex = newIndex;
+      }
+
+      // Delete the child doc (transactions/goals subcollections remain
+      // orphaned in Firestore but can no longer be read because rules
+      // require the parent child doc to exist; the parent can fully purge
+      // via Firebase Console if needed.)
+      const ref = doc(db, 'families', familyId, 'children', childId);
       await deleteDoc(ref);
     }
 
@@ -1096,11 +1242,14 @@
       }
     }
 
-   let _allowanceChecking = false;
+    let _allowanceChecking = false;
     let _allowanceLastRun = 0;
 
     async function runAllowanceCheck() {
+      // Guard 1: don't run concurrently
       if (_allowanceChecking) return;
+      // Guard 2: don't run more than once every 60 seconds (snapshot listeners
+      // fire many times after writes; this prevents loops)
       if (Date.now() - _allowanceLastRun < 60000) return;
       _allowanceChecking = true;
       _allowanceLastRun = Date.now();
@@ -1110,15 +1259,21 @@
         for (const c of state.children) {
           if (!c.allowance || !c.allowance.amount) continue;
           const { amount, freq, lastPaid } = c.allowance;
+          // Use client timestamp (number) — serverTimestamp() returns null briefly
+          // during the write, which used to cause an infinite loop.
           const last = typeof lastPaid === 'number'
             ? new Date(lastPaid)
             : (lastPaid?.toDate ? lastPaid.toDate() : (lastPaid ? new Date(lastPaid) : null));
           const intervalDays = freq === 'weekly' ? 7 : freq === 'biweekly' ? 14 : 30;
           const due = !last || ((now - last) / 86400000 >= intervalDays);
           if (due) {
+            // Step 1: Mark as paid FIRST with a real numeric timestamp.
+            // This way even if the snapshot fires before the deposit completes,
+            // a re-entry into this function won't see a "due" state.
             await updateChild(c.id, {
               allowance: { ...c.allowance, lastPaid: Date.now() }
             });
+            // Step 2: Add the deposit
             await addTransaction({
               childId: c.id,
               amount: Number(amount),
@@ -1132,6 +1287,7 @@
         _allowanceChecking = false;
       }
     }
+
     async function submitRequest({ childId, amount, note }) {
       const col = collection(db, 'families', state.family.id, 'requests');
       await addDoc(col, {
@@ -1261,7 +1417,11 @@
             </div>
           ` : `
             <h2>Kid sign-in</h2>
-            <p class="sub">Enter your name and PIN to check your account.</p>
+            <p class="sub">Enter your family code, name, and PIN.</p>
+            <div class="field">
+              <label>Family Code</label>
+              <input id="fld-famcode" type="text" placeholder="e.g., smith42" autocomplete="off" style="text-transform:lowercase;"/>
+            </div>
             <div class="field">
               <label>Your Name</label>
               <input id="fld-kidname" type="text" placeholder="First name" autocomplete="off"/>
@@ -1275,12 +1435,8 @@
                 <input class="pin" maxlength="1" inputmode="numeric" pattern="[0-9]"/>
               </div>
             </div>
-            <div class="field" style="margin-top:8px">
-              <label>Parent's Email</label>
-              <input id="fld-parentemail" type="email" placeholder="parent@example.com" autocomplete="off"/>
-            </div>
             <button class="btn btn-primary" id="kid-submit">Sign in</button>
-            <p class="sub" style="text-align:center;margin-top:10px;font-size:12px;">Ask a parent if you forgot your PIN.</p>
+            <p class="sub" style="text-align:center;margin-top:10px;font-size:12px;">Ask a parent for your family code if you don't know it.</p>
           `}
         </div>
       </div>
@@ -1331,59 +1487,28 @@
       const kidSubmit = document.getElementById('kid-submit');
       if (kidSubmit) {
         kidSubmit.onclick = async () => {
+          const famCode = $('#fld-famcode').value.trim().toLowerCase();
           const name = $('#fld-kidname').value.trim();
-          const parentEmail = $('#fld-parentemail').value.trim();
           const pin = Array.from(pins).map(p=>p.value).join('');
           state.err = '';
-          if (!name || pin.length !== 4 || !parentEmail) { state.err = 'Fill in name, PIN, and parent\'s email.'; renderApp(); return; }
-          // Kid login approach: a parent must have signed in on this device first,
-          // which caches the family id in localStorage. We then anonymously auth
-          // to read the family's data (allowed by Firestore rules), and match
-          // the name+PIN to a child to grant a "kid session".
-          const cachedFamId = localStorage.getItem('fb_family_id');
-          const cachedFamEmail = localStorage.getItem('fb_family_email');
-          if (!cachedFamId || !cachedFamEmail) {
-            state.err = 'A parent needs to sign in on this device first. Once they have, you can sign in here anytime.';
-            renderApp(); return;
-          }
-          if (cachedFamEmail.toLowerCase() !== parentEmail.toLowerCase()) {
-            state.err = 'Parent email doesn\'t match the account set up on this device.';
-            renderApp(); return;
-          }
-          if (true) {
-            // Find child by name + pin via a one-time read using cached anonymous auth.
-            try {
-              // Try anonymous sign-in (must be enabled in Firebase Auth)
-              const { signInAnonymously } = await import("https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js");
-              if (!auth.currentUser) await signInAnonymously(auth);
-              const childrenSnap = await getDoc(doc(db, 'families', cachedFamId));
-              if (!childrenSnap.exists()) { state.err='Family not found.'; renderApp(); return; }
-              const childrenCol = collection(db, 'families', cachedFamId, 'children');
-              const { getDocs } = await import("https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js");
-              const qs = await getDocs(childrenCol);
-              const match = qs.docs.find(d => {
-                const data = d.data();
-                return data.name.toLowerCase() === name.toLowerCase() && data.pin === pin;
-              });
-              if (!match) { state.err='Name or PIN didn\'t match.'; renderApp(); return; }
-              state.family = { id: cachedFamId };
-              state.kidSession = { childId: match.id, name: match.data().name };
-              state.view = 'kid';
-              state.err = '';
-              // Subscribe to that child only
-              subscribeChildTx(match.id);
-              // Also subscribe to the child doc to get live balance
-              const unsubChild = onSnapshot(doc(db,'families',cachedFamId,'children',match.id), (snap) => {
-                if (snap.exists()) {
-                  state.children = [{ id: snap.id, ...snap.data() }];
-                  renderApp();
-                }
-              });
-              state.unsubs.push(unsubChild);
-              renderApp();
-            } catch (e) {
-              state.err = 'Sign-in failed: ' + (e.message || e); renderApp();
-            }
+          if (!famCode || !name || pin.length !== 4) { state.err = 'Fill in family code, name, and 4-digit PIN.'; renderApp(); return; }
+          try {
+            // 1. Look up familyId from public family-code index
+            const codeSnap = await getDoc(doc(db, 'familyCodes', famCode));
+            if (!codeSnap.exists()) { state.err='Family code not found.'; renderApp(); return; }
+            const familyId = codeSnap.data().familyId;
+            if (!familyId) { state.err='Family code is invalid.'; renderApp(); return; }
+            // 2. Compute kid email + password, sign in
+            const email = kidEmail(familyId, name);
+            const pwd = await derivePassword(familyId, name, pin);
+            await signInWithEmailAndPassword(auth, email, pwd);
+            // 3. onAuthStateChanged will handle the rest; cache so kid view
+            //    can find the right child
+            localStorage.setItem('fb_kid_family', familyId);
+            localStorage.setItem('fb_kid_name', name);
+            state.err='';
+          } catch (e) {
+            state.err = humanizeAuthError(e) || 'Sign-in failed. Check your name and PIN.'; renderApp();
           }
         };
       }
@@ -1693,9 +1818,11 @@
     }
 
     function wireKid() {
-      $('#kid-logout').onclick = () => {
+      $('#kid-logout').onclick = async () => {
         teardownSubs();
-        state.kidSession = null; state.view='login'; state.authMode='kid'; renderApp();
+        state.kidSession = null;
+        state.authMode='kid';
+        await signOut(auth);
       };
       $('#kid-request').onclick = () => { state.modal = 'kidRequest'; renderApp(); };
       wireModal();
@@ -1721,6 +1848,11 @@
               <div class="label">Family name</div>
               <div class="val">${escapeHtml(state.family?.name || '—')}</div>
             </div>
+            <button class="list-item" style="width:100%;text-align:left;" id="set-famcode">
+              <div class="ico">🔑</div>
+              <div class="label">Family code <small style="display:block;font-weight:400;color:var(--muted);font-size:11px;">Kids use this to sign in</small></div>
+              <div class="val">${state.family?.familyCode ? escapeHtml(state.family.familyCode) : 'Set up →'}</div>
+            </button>
             <div class="list-item">
               <div class="ico">✉️</div>
               <div class="label">Signed in as</div>
@@ -1750,7 +1882,7 @@
           </div>
 
           <p class="sub" style="text-align:center;color:var(--muted);font-size:12px;margin-top:20px;">
-            Tip: Kids can sign in on the same device once you've signed in here.
+            Tip: Share your family code with your kids so they can sign in from any device.
           </p>
         </div>
         ${renderModal()}
@@ -1761,6 +1893,7 @@
       $('#back').onclick = () => { state.view='dashboard'; renderApp(); };
       $('#signout').onclick = () => { if (confirm('Sign out?')) doSignOut(); };
       $('#add-kid-btn').onclick = () => { state.modal='addKid'; renderApp(); };
+      $('#set-famcode').onclick = () => { state.modal='famcode'; state.modalCtx={}; renderApp(); };
       document.querySelectorAll('[data-editkid]').forEach(b => b.onclick = () => {
         state.modal='editKid'; state.modalCtx={childId: b.dataset.editkid}; renderApp();
       });
@@ -1859,8 +1992,9 @@
                 <input type="text" id="ek-name" value="${escapeHtml(c.name)}" maxlength="20"/>
               </div>
               <div class="field">
-                <label>4-Digit PIN</label>
-                <input type="text" id="ek-pin" inputmode="numeric" maxlength="4" value="${escapeHtml(c.pin||'')}" style="letter-spacing:.5em;text-align:center;font-size:22px;font-family:'Fraunces',serif;"/>
+                <label>PIN</label>
+                <input type="text" maxlength="4" value="••••" readonly style="letter-spacing:.5em;text-align:center;font-size:22px;font-family:'Fraunces',serif;color:var(--muted);background:var(--bg-2);"/>
+                <p class="sub" style="font-size:11px;margin:6px 2px 0;">PINs can't be edited in place. To change a PIN: Delete this account and add the child back with a new PIN.</p>
               </div>
               <div class="field">
                 <label>Interest Rate (% per month, on positive balance)</label>
@@ -1929,6 +2063,28 @@
           </div>
         `;
       }
+      if (state.modal === 'famcode') {
+        const current = state.family?.familyCode || '';
+        return `
+          <div class="modal-bg" id="modal-bg">
+            <div class="modal" onclick="event.stopPropagation()">
+              <div class="grip"></div>
+              <div class="modal-head">
+                <h2>${current ? 'Family Code' : 'Choose a Family Code'}</h2>
+                <button class="close-btn" id="close">✕</button>
+              </div>
+              ${state.err ? `<div class="err">${escapeHtml(state.err)}</div>` : ''}
+              <p class="sub">A short, memorable code your kids type to sign in from any device. Lowercase letters and numbers, 4&ndash;20 characters.</p>
+              <div class="field">
+                <label>Family Code</label>
+                <input type="text" id="fc-input" maxlength="20" placeholder="e.g., smith42" value="${escapeHtml(current)}" autocomplete="off" style="text-transform:lowercase;letter-spacing:.05em;"/>
+              </div>
+              ${current ? `<p class="sub" style="font-size:12px;">Changing the code will break any kid logins until they retype it.</p>` : ''}
+              <button class="btn btn-primary" id="fc-save">${current ? 'Update Code' : 'Claim Code'}</button>
+            </div>
+          </div>
+        `;
+      }
       return '';
     }
 
@@ -1989,24 +2145,39 @@
           const pin = $('#kid-pin').value.replace(/\D/g,'').slice(0,4);
           if (!name) { state.err='Enter a name.'; renderApp(); return; }
           if (pin.length !== 4) { state.err='PIN must be 4 digits.'; renderApp(); return; }
-          await addChild({ name, pin, color: state.modalCtx.color || '' });
-          state.modal=null; state.modalCtx={}; state.err=''; renderApp();
+          try {
+            await addChild({ name, pin, color: state.modalCtx.color || '' });
+            state.modal=null; state.modalCtx={}; state.err=''; renderApp();
+          } catch (e) {
+            state.err = e.message || 'Could not add child.'; renderApp();
+          }
         };
       }
 
       if (state.modal === 'editKid') {
         $('#ek-save').onclick = async () => {
           const name = $('#ek-name').value.trim();
-          const pin = $('#ek-pin').value.replace(/\D/g,'').slice(0,4);
           const rate = parseFloat($('#ek-rate').value) || 0;
           const allowAmt = parseFloat($('#ek-allow-amt').value);
           const allowFreq = $('#ek-allow-freq').value;
           if (!name) { state.err='Name required.'; renderApp(); return; }
-          if (pin.length !== 4) { state.err='PIN must be 4 digits.'; renderApp(); return; }
-          const patch = { name, pin, interestRate: rate };
+          const child = state.children.find(c=>c.id===state.modalCtx.childId);
+          if (!child) { state.modal=null; renderApp(); return; }
+          // Name change: only allow if slug stays the same (changing slug
+          // would invalidate kid login email). Reject otherwise.
+          if (nameSlug(name) !== nameSlug(child.name)) {
+            state.err='Name change would break the kid login. To rename, delete and re-add.';
+            renderApp(); return;
+          }
+          const patch = { name, interestRate: rate };
           if (allowFreq && allowAmt > 0) {
-            const existing = state.children.find(c=>c.id===state.modalCtx.childId)?.allowance;
-            patch.allowance = { amount: allowAmt, freq: allowFreq, lastPaid: existing?.lastPaid || Date.now() };
+            // For NEW allowances (no existing lastPaid), start the clock from now
+            // so the first deposit happens on schedule, not immediately on save.
+            patch.allowance = {
+              amount: allowAmt,
+              freq: allowFreq,
+              lastPaid: child.allowance?.lastPaid || Date.now()
+            };
           } else {
             patch.allowance = null;
           }
@@ -2041,27 +2212,85 @@
           alert('Request sent! A parent will review it.');
         };
       }
+
+      if (state.modal === 'famcode') {
+        $('#fc-save').onclick = async () => {
+          const newCode = $('#fc-input').value.trim().toLowerCase().replace(/[^a-z0-9]/g,'');
+          if (newCode.length < 4 || newCode.length > 20) { state.err='Code must be 4–20 characters (letters/numbers only).'; renderApp(); return; }
+          const currentCode = state.family?.familyCode || '';
+          if (newCode === currentCode) { state.modal=null; state.modalCtx={}; state.err=''; renderApp(); return; }
+          try {
+            // Claim the new code first (will fail if someone else owns it)
+            const newRef = doc(db, 'familyCodes', newCode);
+            const existing = await getDoc(newRef);
+            if (existing.exists() && existing.data().familyId !== state.family.id) {
+              state.err='That code is taken. Try another.'; renderApp(); return;
+            }
+            await setDoc(newRef, { familyId: state.family.id, claimedAt: serverTimestamp() });
+            // Release the old code
+            if (currentCode) {
+              try { await deleteDoc(doc(db, 'familyCodes', currentCode)); } catch {}
+            }
+            // Update family doc
+            await updateDoc(doc(db, 'families', state.family.id), { familyCode: newCode });
+            state.family.familyCode = newCode;
+            state.modal=null; state.modalCtx={}; state.err=''; renderApp();
+          } catch (e) {
+            state.err='Could not save: ' + (e.message||e); renderApp();
+          }
+        };
+      }
     }
 
     // ============= INIT =============
     if (isFirebaseConfigured) {
       onAuthStateChanged(auth, async (user) => {
-        if (user && !user.isAnonymous) {
+        if (user) {
           state.user = user;
-          state.view = 'dashboard';
-          // Cache for kid logins on this device
-          localStorage.setItem('fb_family_id', user.uid);
-          localStorage.setItem('fb_family_email', user.email || '');
-          await loadFamilyAndSubscribe(user);
-          renderApp();
-        } else if (!user) {
-          state.user = null;
-          if (!state.kidSession) {
-            state.view = 'login';
+          // Detect whether this is a kid account by checking the email pattern
+          const isKid = (user.email || '').startsWith('kid+');
+          if (isKid) {
+            // Parse familyId and child name from the kid email:
+            //   kid+{familyId}+{slug}@{KID_EMAIL_DOMAIN}
+            const m = (user.email || '').match(/^kid\+([^+]+)\+([^@]+)@/);
+            if (!m) {
+              state.err = 'Kid account email malformed.'; state.view='login'; renderApp(); return;
+            }
+            const familyId = m[1];
+            const slug = m[2];
+            // Find child doc by slug
+            try {
+              const qs = await getDocs(query(
+                collection(db, 'families', familyId, 'children'),
+                where('nameSlug', '==', slug),
+                limit(1)
+              ));
+              if (qs.empty) {
+                state.err = 'Your account was removed by a parent.';
+                await signOut(auth); return;
+              }
+              const childDoc = qs.docs[0];
+              state.kidSession = { childId: childDoc.id, name: childDoc.data().name, familyId };
+              state.view = 'kid';
+              await loadFamilyForKid(user, familyId, childDoc.id);
+              renderApp();
+            } catch (e) {
+              state.err = 'Could not load your account: ' + (e.message||e);
+              await signOut(auth);
+            }
+          } else {
+            // Parent
+            state.kidSession = null;
+            state.view = 'dashboard';
+            await loadFamilyAndSubscribe(user);
+            renderApp();
           }
+        } else {
+          state.user = null;
+          state.kidSession = null;
+          state.view = 'login';
           renderApp();
         }
-        // anonymous user (kid auth) is handled by kid sign-in flow directly
       });
     } else {
       renderApp();
