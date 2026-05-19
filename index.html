@@ -925,6 +925,7 @@
       selectedChildId: null,
       kidSession: null,        // {childId, name} when kid is logged in
       pendingJoin: null,       // { familyId, familyName } when waiting for owner approval
+      joinInProgress: false,   // true while doParentJoin is running, to suppress auth-handler auto-load
       err: '',
       loading: false,
       modal: null,             // 'addTx' | 'addKid' | 'addGoal' | 'editKid' | 'settings'
@@ -1011,12 +1012,18 @@
     // were approved into). For owners, the family doc id == their uid.
     // For approved second parents, we search by memberUids.
     async function findFamilyForParent(user) {
-      // First, try the owner shortcut: family doc id == user.uid
-      const ownRef = doc(db, 'families', user.uid);
-      const ownSnap = await getDoc(ownRef);
-      if (ownSnap.exists()) {
-        return { id: ownSnap.id, ...ownSnap.data() };
-      }
+      // First, try the owner shortcut: family doc id == user.uid.
+      // Wrap in try/catch because Firestore returns permission-denied (not
+      // not-found) for non-existent docs when the read rule references
+      // resource.data fields. For non-owners, this read always denies; we
+      // fall through to the memberUids query.
+      try {
+        const ownRef = doc(db, 'families', user.uid);
+        const ownSnap = await getDoc(ownRef);
+        if (ownSnap.exists()) {
+          return { id: ownSnap.id, ...ownSnap.data() };
+        }
+      } catch (e) { /* not the owner, fall through */ }
       // Otherwise, search for a family where this user is a member
       try {
         const qs = await getDocs(query(
@@ -1093,7 +1100,8 @@
     }
 
     // Owner action: approve a pending parent. Moves them from pendingRequests
-    // into memberUids + parents.
+    // into memberUids + parents, and records their email/displayName in
+    // parentInfo so the UI can show identifying info later.
     async function approveParentRequest(requestUid) {
       if (!state.family || state.user?.uid !== state.family.ownerUid) {
         throw new Error('Only the family owner can approve requests.');
@@ -1108,11 +1116,18 @@
       const newPendingUids = (data.pendingMemberUids || []).filter(u => u !== requestUid);
       const newParents = Array.from(new Set([...(data.parents || []), requestUid]));
       const newMembers = Array.from(new Set([...(data.memberUids || []), requestUid]));
+      const newParentInfo = { ...(data.parentInfo || {}) };
+      newParentInfo[requestUid] = {
+        email: req.email || '',
+        displayName: req.displayName || '',
+        approvedAt: Date.now()
+      };
       await updateDoc(famRef, {
         pendingRequests: newPending,
         pendingMemberUids: newPendingUids,
         parents: newParents,
-        memberUids: newMembers
+        memberUids: newMembers,
+        parentInfo: newParentInfo
       });
     }
 
@@ -1342,37 +1357,54 @@
     // Sign up (or sign in if account exists) and submit a join request to
     // an existing family identified by family code.
     async function doParentJoin(email, password, famCode) {
-      // 1. Resolve family code → familyId
-      const found = await findFamilyByCode(famCode);
-      if (!found) throw new Error('Family code not found. Ask the account owner to confirm it.');
-      // 2. Try to create the account; if it already exists, sign in instead.
-      let user;
+      // Set joinInProgress BEFORE any auth call so the auth state handler
+      // knows to wait instead of auto-creating a new family for this user.
+      state.joinInProgress = true;
       try {
-        const cred = await createUserWithEmailAndPassword(auth, email, password);
-        user = cred.user;
-      } catch (e) {
-        if (e.code === 'auth/email-already-in-use') {
-          const cred = await signInWithEmailAndPassword(auth, email, password);
+        const found = await findFamilyByCode(famCode);
+        if (!found) throw new Error('Family code not found. Ask the account owner to confirm it.');
+
+        // Try to create the account; if it already exists, sign in instead.
+        let user;
+        try {
+          const cred = await createUserWithEmailAndPassword(auth, email, password);
           user = cred.user;
-        } else {
-          throw e;
+        } catch (e) {
+          if (e.code === 'auth/email-already-in-use') {
+            try {
+              const cred = await signInWithEmailAndPassword(auth, email, password);
+              user = cred.user;
+            } catch (signinErr) {
+              if (signinErr.code === 'auth/invalid-credential' || signinErr.code === 'auth/wrong-password') {
+                throw new Error('This email is already registered with a different password. Use that password, or have the account owner reset it from Firebase Auth.');
+              }
+              throw signinErr;
+            }
+          } else {
+            throw e;
+          }
         }
+
+        // Note: we don't pre-check whether this user already owns a family
+        // (via getDoc(families/{user.uid})), because Firestore returns
+        // permission-denied — not not-found — for non-existent docs whose
+        // read rule references resource.data. If they do own a family,
+        // findFamilyForParent will route them there after sign-out / re-login.
+
+        const result = await submitJoinRequest(user, found.familyId);
+
+        state.pendingJoin = { familyId: found.familyId, familyName: found.familyName };
+        state.joinInProgress = false;
+        // onAuthStateChanged already fired during the auth call above; we
+        // held it off via joinInProgress and now drive the view ourselves.
+        state.view = 'pending';
+        state.err = '';
+        renderApp();
+        return result;
+      } catch (e) {
+        state.joinInProgress = false;
+        throw e;
       }
-      // 3. Submit the join request. (If the user already had a family of
-      //    their own, this will fail at the onAuthStateChanged step because
-      //    findFamilyForParent will return their owned family first. That's
-      //    by design — one family per parent account.)
-      // 4. Check: if the signed-in user is the owner of a family already,
-      //    we shouldn't let them join another one.
-      const ownSnap = await getDoc(doc(db, 'families', user.uid));
-      if (ownSnap.exists()) {
-        throw new Error("This email already owns a family. To join another, sign up with a different email.");
-      }
-      const result = await submitJoinRequest(user, found.familyId);
-      // 5. Stash pending info so the auth-state handler can show the right
-      //    screen.
-      state.pendingJoin = { familyId: found.familyId, familyName: found.familyName };
-      return result;
     }
     async function doSignOut() {
       teardownSubs();
@@ -1687,6 +1719,14 @@
       const isJoin = formMode === 'join' && isParent;
       const isLogin = formMode === 'login' && isParent;
 
+      // Show "Member since YYYY" — uses the year of the most recent
+      // signed-in user's account creation (stashed in localStorage on
+      // auth). Falls back to the current year for first-time visitors.
+      let memberYear = (new Date()).getFullYear();
+      try {
+        const stored = localStorage.getItem('fb_member_since_year');
+        if (stored && /^\d{4}$/.test(stored)) memberYear = stored;
+      } catch {}
       return `
       <div class="auth-wrap">
         <div class="brand">
@@ -1694,7 +1734,7 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="#f5efe1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18M5 21V10l7-5 7 5v11M9 9h.01M15 9h.01M9 13h.01M15 13h.01M9 17h.01M15 17h.01"/></svg>
           </div>
           <h1>Family <em>Bank</em></h1>
-          <p>Member since today</p>
+          <p>Member since ${memberYear}</p>
         </div>
 
         <div class="card">
@@ -2265,11 +2305,13 @@
               parents.map(uid => {
                 const isThisOwner = uid === fam.ownerUid;
                 const isMe = uid === state.user?.uid;
-                // We don't store parent emails on the family doc; only show the
-                // owner's email for themselves. For other parents, show a short uid.
+                // Display priority: my own email > stored parentInfo.email > owner label > short uid
+                const parentInfo = (fam.parentInfo || {})[uid] || {};
                 const labelText = isMe
                   ? (state.user.email || 'You')
-                  : (isThisOwner ? 'Owner' : 'Parent · ' + uid.slice(0,6));
+                  : (parentInfo.email
+                      ? parentInfo.email
+                      : (isThisOwner ? 'Owner' : 'Parent · ' + uid.slice(0,6)));
                 const tag = isThisOwner
                   ? '<small style="display:block;color:var(--muted);font-size:11px;">Owner — can\'t be removed</small>'
                   : (isMe ? '<small style="display:block;color:var(--muted);font-size:11px;">You</small>' : '');
@@ -2731,6 +2773,15 @@
       onAuthStateChanged(auth, async (user) => {
         if (user) {
           state.user = user;
+          // Persist the year of this user's first account creation so the
+          // login screen banner can show "Member since YYYY" on next visit.
+          try {
+            const ct = user.metadata?.creationTime;
+            if (ct) {
+              const y = new Date(ct).getFullYear();
+              if (y) localStorage.setItem('fb_member_since_year', String(y));
+            }
+          } catch {}
           // Detect whether this is a kid account by checking the email pattern
           const isKid = (user.email || '').startsWith('kid+');
           if (isKid) {
@@ -2775,6 +2826,12 @@
           } else {
             // Parent
             state.kidSession = null;
+            // If a join is in progress, don't auto-create or auto-load a
+            // family here — doParentJoin will drive the view to 'pending'
+            // once submitJoinRequest succeeds.
+            if (state.joinInProgress) {
+              return;
+            }
             const result = await loadFamilyAndSubscribe(user);
             if (result && result.pending) {
               state.view = 'pending';
