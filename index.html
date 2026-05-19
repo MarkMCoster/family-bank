@@ -876,7 +876,11 @@
     // ===== APP CHECK (optional, recommended) =====
     // After you set up reCAPTCHA v3 (see SETUP-PRODUCTION.md), paste your
     // reCAPTCHA *site* key here. Leave as 'DISABLED' to skip App Check.
-    const RECAPTCHA_SITE_KEY = "6LcujPAsAAAAAN2j2TSigijsvr3c4Wt7n2mEIb_r";
+    // TEMPORARILY DISABLED FOR DIAGNOSTIC. Restore the original key below
+    // once kid sign-in is confirmed working.
+    const RECAPTCHA_SITE_KEY = "DISABLED";
+    // Original key:
+    // const RECAPTCHA_SITE_KEY = "6LcujPAsAAAAAN2j2TSigijsvr3c4Wt7n2mEIb_r";
 
     // ===== KID-AUTH NAMESPACE =====
     // Kid accounts are created automatically as hidden Firebase users with
@@ -1204,6 +1208,27 @@
         await updateDoc(familyRef, patch);
         family = { ...family, ...patch };
       }
+
+      // Auto-heal: ensure the familyCodes doc points at this family's
+      // correctly-cased doc id. An older version of the code stored a
+      // lowercased uid here, which broke kid sign-in and parent join
+      // (both rely on doc(db, 'families', familyId)). Only the owner can
+      // write familyCodes per the rules, so we do this on owner sign-in.
+      const isOwnerCheck = user.uid === (family.ownerUid || family.id);
+      if (isOwnerCheck && family.familyCode) {
+        try {
+          const codeRef = doc(db, 'familyCodes', family.familyCode);
+          const codeSnap = await getDoc(codeRef);
+          if (codeSnap.exists() && codeSnap.data().familyId !== family.id) {
+            await setDoc(codeRef, { familyId: family.id, claimedAt: serverTimestamp() });
+          } else if (!codeSnap.exists()) {
+            await setDoc(codeRef, { familyId: family.id, claimedAt: serverTimestamp() });
+          }
+        } catch (e) {
+          console.warn('familyCodes auto-heal skipped:', e.message);
+        }
+      }
+
       state.family = family;
       state.isOwner = state.user?.uid === family.ownerUid;
       state.pendingJoin = null;
@@ -1248,6 +1273,17 @@
 
     async function loadFamilyForKid(user, familyId, childId) {
       // Kid signed in: only subscribe to their own child doc + tx + goals.
+      // Step 1: load family name FIRST so state.family is set before any
+      //   snapshot callbacks fire (the tx/goal subscriptions read state.family.id).
+      try {
+        const f = await getDoc(doc(db, 'families', familyId));
+        if (f.exists()) state.family = { id: f.id, name: f.data().name };
+        else state.family = { id: familyId, name: 'Family Bank' };
+      } catch (e) {
+        // Even if we can't read it, set the id so subscriptions work
+        state.family = { id: familyId, name: 'Family Bank' };
+      }
+      // Step 2: subscribe to the child doc
       const childRef = doc(db, 'families', familyId, 'children', childId);
       const unsubChild = onSnapshot(childRef, (snap) => {
         if (snap.exists()) {
@@ -1255,13 +1291,11 @@
           subscribeChildTx(childId);
           renderApp();
         }
+      }, (err) => {
+        state.err = 'Could not load account data: ' + (err.message || err);
+        renderApp();
       });
       state.unsubs.push(unsubChild);
-      // Also load family name for header
-      try {
-        const f = await getDoc(doc(db, 'families', familyId));
-        if (f.exists()) state.family = { id: f.id, name: f.data().name };
-      } catch (e) { /* rules may forbid; that's okay */ }
     }
 
     function subscribeChildTx(childId) {
@@ -1271,12 +1305,18 @@
       const unsub = onSnapshot(txCol, (qs) => {
         state.transactions[childId] = qs.docs.map(d => ({ id: d.id, ...d.data() }));
         renderApp();
+      }, (err) => {
+        state.err = 'Could not load transactions: ' + (err.message || err);
+        renderApp();
       });
       state.unsubs.push(unsub);
 
       const goalsCol = collection(db, 'families', state.family.id, 'children', childId, 'goals');
       const unsubG = onSnapshot(goalsCol, (qs) => {
         state.goals[childId] = qs.docs.map(d => ({ id: d.id, ...d.data() }));
+        renderApp();
+      }, (err) => {
+        state.err = 'Could not load goals: ' + (err.message || err);
         renderApp();
       });
       state.unsubs.push(unsubG);
@@ -2694,34 +2734,31 @@
           // Detect whether this is a kid account by checking the email pattern
           const isKid = (user.email || '').startsWith('kid+');
           if (isKid) {
-            // Parse familyId and (legacy) name slug from the kid email:
-            //   kid+{familyId}+{slug}@{KID_EMAIL_DOMAIN}
-            const m = (user.email || '').match(/^kid\+([^+]+)\+([^@]+)@/);
-            if (!m) {
-              state.err = 'Kid account email malformed.'; state.view='login'; renderApp(); return;
-            }
-            const familyId = m[1];
-            // Find the kid's child doc via direct gets only (no list query).
-            // Step 1: read the family doc — kid is in memberUids, so allowed.
-            // Step 2: look up the childDocId by the kid's own auth uid in
-            //         the family's kidUidToChildId index.
-            // Step 3: direct get on the kid's child doc.
+            // Find the kid's family doc by querying memberUids — this is
+            // robust to any historical inconsistency in how familyId was
+            // stored or cased in familyCodes. The kid's auth uid is the
+            // source of truth; we just look up which family they belong to.
             try {
-              const famSnap = await getDoc(doc(db, 'families', familyId));
-              if (!famSnap.exists()) {
-                state.err = 'Family not found.';
+              const qs = await getDocs(query(
+                collection(db, 'families'),
+                where('memberUids', 'array-contains', user.uid),
+                limit(1)
+              ));
+              if (qs.empty) {
+                state.err = 'Your account is not linked to a family. Ask a parent to re-add you.';
                 await signOut(auth); return;
               }
-              const famData = famSnap.data();
+              const famDoc = qs.docs[0];
+              const familyId = famDoc.id;
+              const famData = famDoc.data();
+
+              // Look up the kid's child doc via the family's kidUidToChildId map
               let childId = (famData.kidUidToChildId || {})[user.uid];
-              // Fallback path for families that haven't been migrated yet:
-              // the legacy kidIndex maps slug -> kidUid (wrong direction
-              // for us). The parent owner needs to sign in once to trigger
-              // migration. Tell the kid that politely.
               if (!childId) {
                 state.err = 'Your account is not fully set up. Ask a parent to sign in once, then try again.';
                 await signOut(auth); return;
               }
+
               const childSnap = await getDoc(doc(db, 'families', familyId, 'children', childId));
               if (!childSnap.exists()) {
                 state.err = 'Your account was removed by a parent.';
@@ -2732,7 +2769,7 @@
               await loadFamilyForKid(user, familyId, childId);
               renderApp();
             } catch (e) {
-              state.err = 'Could not load your account: ' + (e.message||e);
+              state.err = 'Could not load your account: ' + (e.message || e);
               await signOut(auth);
             }
           } else {
