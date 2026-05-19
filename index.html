@@ -49,11 +49,18 @@
       color: var(--ink);
       background: var(--bg);
       -webkit-font-smoothing: antialiased;
-      overscroll-behavior-y: none;
+      overscroll-behavior: none;
+      overflow-x: hidden;
+    }
+    html {
+      /* Prevent rubber-band scroll on iOS when content fits the viewport */
+      height: 100%;
     }
     body {
       padding-top: env(safe-area-inset-top);
       padding-bottom: env(safe-area-inset-bottom);
+      /* Only allow vertical scroll when content actually overflows */
+      overflow-y: auto;
     }
     button { font-family: inherit; cursor: pointer; border: none; background: none; color: inherit; }
     input, select, textarea { font-family: inherit; font-size: 16px; }
@@ -849,7 +856,8 @@
     import { initializeApp, getApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
     import {
       getAuth, onAuthStateChanged, initializeAuth, browserLocalPersistence,
-      createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut
+      createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut,
+      sendPasswordResetEmail
     } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
     import {
       getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc,
@@ -1413,6 +1421,7 @@
               <input id="fld-pwd" type="password" placeholder="${isSignup ? 'At least 8 characters' : '••••••••'}" autocomplete="${isSignup?'new-password':'current-password'}"/>
             </div>
             <button class="btn btn-primary" id="auth-submit">${isSignup ? 'Create Account' : 'Sign In'}</button>
+            ${!isSignup ? `<div class="toggle-link" style="margin-top:10px;"><button id="forgot-pwd">Forgot password?</button></div>` : ''}
             <div class="toggle-link">
               ${isSignup ? "Already have an account? <button id='toggle-form'>Sign in</button>" : "New to Family Bank? <button id='toggle-form'>Open an account</button>"}
             </div>
@@ -1451,6 +1460,26 @@
 
       const toggle = document.getElementById('toggle-form');
       if (toggle) toggle.onclick = () => { state.authForm = state.authForm==='login'?'signup':'login'; state.err=''; renderApp(); };
+
+      const forgot = document.getElementById('forgot-pwd');
+      if (forgot) {
+        forgot.onclick = async () => {
+          const email = ($('#fld-email')?.value || '').trim();
+          state.err = '';
+          if (!email) {
+            state.err = 'Enter your email above first, then tap "Forgot password?".';
+            renderApp(); return;
+          }
+          try {
+            await sendPasswordResetEmail(auth, email);
+            state.err = '';
+            alert('Password reset email sent to ' + email + '. Check your inbox (and spam folder).');
+          } catch (e) {
+            state.err = humanizeAuthError(e) || 'Could not send reset email.';
+            renderApp();
+          }
+        };
+      }
 
       const submit = document.getElementById('auth-submit');
       if (submit) {
