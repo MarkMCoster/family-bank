@@ -52,15 +52,9 @@
       overscroll-behavior: none;
       overflow-x: hidden;
     }
-    html {
-      /* Prevent rubber-band scroll on iOS when content fits the viewport */
-      height: 100%;
-    }
     body {
       padding-top: env(safe-area-inset-top);
       padding-bottom: env(safe-area-inset-bottom);
-      /* Only allow vertical scroll when content actually overflows */
-      overflow-y: auto;
     }
     button { font-family: inherit; cursor: pointer; border: none; background: none; color: inherit; }
     input, select, textarea { font-family: inherit; font-size: 16px; }
@@ -862,7 +856,7 @@
     import {
       getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc,
       collection, addDoc, getDocs, onSnapshot, query, where, orderBy, limit,
-      serverTimestamp, deleteField, writeBatch
+      serverTimestamp, deleteField, writeBatch, arrayUnion
     } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
     import { initializeAppCheck, ReCaptchaV3Provider }
       from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app-check.js";
@@ -914,17 +908,19 @@
 
     // ============= STATE =============
     const state = {
-      view: 'login',           // login | dashboard | child | settings | kid
+      view: 'login',           // login | dashboard | child | settings | kid | pending
       authMode: 'parent',      // parent | kid
-      authForm: 'login',       // login | signup
+      authForm: 'login',       // login | signup | join
       user: null,              // firebase user
-      family: null,            // { id, name, parents:[uid] }
+      family: null,            // { id, name, parents:[uid], ownerUid, memberUids, pendingRequests }
+      isOwner: false,          // true if state.user.uid === state.family.ownerUid
       children: [],            // [{id, name, balance, pin, color, interestRate, allowance:{amount,freq,lastPaid}, ...}]
       transactions: {},        // { childId: [tx...] }
       goals: {},               // { childId: [goal...] }
       requests: [],            // pending withdrawal requests
       selectedChildId: null,
       kidSession: null,        // {childId, name} when kid is logged in
+      pendingJoin: null,       // { familyId, familyName } when waiting for owner approval
       err: '',
       loading: false,
       modal: null,             // 'addTx' | 'addKid' | 'addGoal' | 'editKid' | 'settings'
@@ -1001,27 +997,232 @@
         parents: [user.uid],
         memberUids: [user.uid],       // parents + all kid uids (for rule checks)
         kidIndex: {},                 // { nameSlug: kidUid } for kid sign-in lookup
+        kidUidToChildId: {},          // { kidUid: childDocId } for kid self-lookup
+        pendingRequests: [],          // [{uid, email, displayName, requestedAt}]
         createdAt: serverTimestamp()
       });
     }
 
-    async function loadFamilyAndSubscribe(user) {
-      // Family doc id == owner parent's uid.
-      const familyRef = doc(db, 'families', user.uid);
-      const snap = await getDoc(familyRef);
-      if (!snap.exists()) {
-        // First-time login: create empty family
-        await setupParent(user, '');
-      } else {
-        // Migrate older family docs that pre-date the security upgrade
-        const d = snap.data();
-        const patch = {};
-        if (!Array.isArray(d.memberUids)) patch.memberUids = [user.uid, ...(d.parents||[])].filter((v,i,a)=>a.indexOf(v)===i);
-        if (!d.kidIndex) patch.kidIndex = {};
-        if (Object.keys(patch).length) await updateDoc(familyRef, patch);
+    // Find which family a parent belongs to (their own family, or one they
+    // were approved into). For owners, the family doc id == their uid.
+    // For approved second parents, we search by memberUids.
+    async function findFamilyForParent(user) {
+      // First, try the owner shortcut: family doc id == user.uid
+      const ownRef = doc(db, 'families', user.uid);
+      const ownSnap = await getDoc(ownRef);
+      if (ownSnap.exists()) {
+        return { id: ownSnap.id, ...ownSnap.data() };
       }
-      const fSnap = await getDoc(familyRef);
-      state.family = { id: fSnap.id, ...fSnap.data() };
+      // Otherwise, search for a family where this user is a member
+      try {
+        const qs = await getDocs(query(
+          collection(db, 'families'),
+          where('memberUids', 'array-contains', user.uid),
+          limit(1)
+        ));
+        if (!qs.empty) {
+          const d = qs.docs[0];
+          return { id: d.id, ...d.data() };
+        }
+      } catch (e) { /* fall through */ }
+      return null;
+    }
+
+    // Find a family by its public family code (used during join request).
+    // Returns { familyId, familyName } or null. We deliberately only return
+    // the minimum needed for the user to confirm they're joining the right
+    // family — full family details are gated behind owner approval.
+    async function findFamilyByCode(code) {
+      const codeSnap = await getDoc(doc(db, 'familyCodes', code));
+      if (!codeSnap.exists()) return null;
+      const familyId = codeSnap.data().familyId;
+      if (!familyId) return null;
+      // Read just the family name for confirmation
+      try {
+        const fSnap = await getDoc(doc(db, 'families', familyId));
+        if (!fSnap.exists()) return null;
+        return { familyId, familyName: fSnap.data().name || 'this family' };
+      } catch (e) {
+        // Rules may forbid reading the family doc directly to non-members.
+        // That's fine — we'll still let them submit a request to that id.
+        return { familyId, familyName: 'this family' };
+      }
+    }
+
+    // Check if this signed-in user already has a pending request to some
+    // family. If so, return { familyId, familyName }. We do this by scanning
+    // families where pendingRequests contains an entry with this uid. This
+    // requires that pendingRequests entries be readable to the requester —
+    // see the security rules notes in the README.
+    async function findPendingRequestForUser(user) {
+      try {
+        const qs = await getDocs(query(
+          collection(db, 'families'),
+          where('pendingMemberUids', 'array-contains', user.uid),
+          limit(1)
+        ));
+        if (!qs.empty) {
+          const d = qs.docs[0];
+          return { familyId: d.id, familyName: d.data().name || 'a family' };
+        }
+      } catch (e) { /* fall through */ }
+      return null;
+    }
+
+    // Submit a join request. The requester appends themselves to the
+    // family's pendingRequests / pendingMemberUids arrays. This is a write
+    // that does NOT require reading the family doc first (non-members
+    // can't read it). Firestore rules permit this specific write.
+    async function submitJoinRequest(user, familyId) {
+      const famRef = doc(db, 'families', familyId);
+      const newReq = {
+        uid: user.uid,
+        email: user.email || '',
+        displayName: user.displayName || '',
+        requestedAt: Date.now()        // serverTimestamp() not allowed in array entries
+      };
+      await updateDoc(famRef, {
+        pendingRequests: arrayUnion(newReq),
+        pendingMemberUids: arrayUnion(user.uid)
+      });
+      return { submitted: true };
+    }
+
+    // Owner action: approve a pending parent. Moves them from pendingRequests
+    // into memberUids + parents.
+    async function approveParentRequest(requestUid) {
+      if (!state.family || state.user?.uid !== state.family.ownerUid) {
+        throw new Error('Only the family owner can approve requests.');
+      }
+      const famRef = doc(db, 'families', state.family.id);
+      const fSnap = await getDoc(famRef);
+      if (!fSnap.exists()) throw new Error('Family not found.');
+      const data = fSnap.data();
+      const req = (data.pendingRequests || []).find(r => r.uid === requestUid);
+      if (!req) throw new Error('Request not found.');
+      const newPending = (data.pendingRequests || []).filter(r => r.uid !== requestUid);
+      const newPendingUids = (data.pendingMemberUids || []).filter(u => u !== requestUid);
+      const newParents = Array.from(new Set([...(data.parents || []), requestUid]));
+      const newMembers = Array.from(new Set([...(data.memberUids || []), requestUid]));
+      await updateDoc(famRef, {
+        pendingRequests: newPending,
+        pendingMemberUids: newPendingUids,
+        parents: newParents,
+        memberUids: newMembers
+      });
+    }
+
+    // Owner action: deny a pending parent. Removes from pendingRequests only.
+    async function denyParentRequest(requestUid) {
+      if (!state.family || state.user?.uid !== state.family.ownerUid) {
+        throw new Error('Only the family owner can deny requests.');
+      }
+      const famRef = doc(db, 'families', state.family.id);
+      const fSnap = await getDoc(famRef);
+      if (!fSnap.exists()) return;
+      const data = fSnap.data();
+      const newPending = (data.pendingRequests || []).filter(r => r.uid !== requestUid);
+      const newPendingUids = (data.pendingMemberUids || []).filter(u => u !== requestUid);
+      await updateDoc(famRef, {
+        pendingRequests: newPending,
+        pendingMemberUids: newPendingUids
+      });
+    }
+
+    // Owner action: revoke an existing parent's access. Cannot remove the
+    // owner themselves. The removed parent will be booted on their next
+    // auth state check (they'll lose read access to family data via rules).
+    async function revokeParentAccess(parentUid) {
+      if (!state.family || state.user?.uid !== state.family.ownerUid) {
+        throw new Error('Only the family owner can remove parents.');
+      }
+      if (parentUid === state.family.ownerUid) {
+        throw new Error("You can't remove the family owner.");
+      }
+      const famRef = doc(db, 'families', state.family.id);
+      const fSnap = await getDoc(famRef);
+      if (!fSnap.exists()) return;
+      const data = fSnap.data();
+      const newParents = (data.parents || []).filter(u => u !== parentUid);
+      // Keep kid uids in memberUids; only remove the revoked parent uid
+      const newMembers = (data.memberUids || []).filter(u => u !== parentUid);
+      await updateDoc(famRef, {
+        parents: newParents,
+        memberUids: newMembers
+      });
+    }
+
+    async function loadFamilyAndSubscribe(user) {
+      // Look up the family this user belongs to. For the owner, the family
+      // doc id == their uid. For approved additional parents, we search by
+      // memberUids. For brand-new users (no family yet), they get created as
+      // their own family's owner.
+      let family = await findFamilyForParent(user);
+      if (!family) {
+        // No family. Two cases:
+        //   (a) This is a fresh signup who skipped the "new family" flow;
+        //       create them an empty family of their own.
+        //   (b) This is a user who requested to join — they'll see the
+        //       pending screen instead, handled by the caller.
+        // Check for a pending request first.
+        const pending = await findPendingRequestForUser(user);
+        if (pending) {
+          state.pendingJoin = pending;
+          return { pending: true };
+        }
+        await setupParent(user, '');
+        family = await findFamilyForParent(user);
+      }
+      // One-time migrations for older family docs
+      const familyRef = doc(db, 'families', family.id);
+      const patch = {};
+      if (!family.ownerUid) patch.ownerUid = family.id;  // family id == original owner uid
+      if (!Array.isArray(family.memberUids)) patch.memberUids = [family.id, ...(family.parents||[])].filter((v,i,a)=>a.indexOf(v)===i);
+      if (!family.kidIndex) patch.kidIndex = {};
+      if (!Array.isArray(family.pendingRequests)) patch.pendingRequests = [];
+      if (!Array.isArray(family.pendingMemberUids)) patch.pendingMemberUids = [];
+      // Migration: populate kidUidToChildId by reading all children docs.
+      // This enables kids to find their own child doc via direct GET
+      // instead of a list query (which trips Firestore's rule evaluator
+      // when the rule uses a cross-document get() helper).
+      if (!family.kidUidToChildId || Object.keys(family.kidUidToChildId).length === 0) {
+        try {
+          const childrenSnap = await getDocs(collection(db, 'families', family.id, 'children'));
+          const map = {};
+          childrenSnap.forEach(d => {
+            const data = d.data();
+            if (data.kidUid) map[data.kidUid] = d.id;
+          });
+          if (Object.keys(map).length > 0) patch.kidUidToChildId = map;
+          else if (!family.kidUidToChildId) patch.kidUidToChildId = {};
+        } catch (e) {
+          // Best effort — if read fails, leave migration for next time
+          console.warn('kidUidToChildId migration skipped:', e.message);
+        }
+      }
+      if (Object.keys(patch).length) {
+        await updateDoc(familyRef, patch);
+        family = { ...family, ...patch };
+      }
+      state.family = family;
+      state.isOwner = state.user?.uid === family.ownerUid;
+      state.pendingJoin = null;
+
+      // Subscribe to the family doc so we react to approvals/revocations
+      const unsubFam = onSnapshot(familyRef, (snap) => {
+        if (!snap.exists()) return;
+        const fam = { id: snap.id, ...snap.data() };
+        // If we got revoked, force sign-out
+        if (state.user && !(fam.memberUids || []).includes(state.user.uid)) {
+          alert('Your access to this family was removed.');
+          doSignOut();
+          return;
+        }
+        state.family = fam;
+        state.isOwner = state.user?.uid === fam.ownerUid;
+        renderApp();
+      });
+      state.unsubs.push(unsubFam);
 
       // Children
       const childrenCol = collection(db, 'families', state.family.id, 'children');
@@ -1042,6 +1243,7 @@
         renderApp();
       });
       state.unsubs.push(unsubReqs);
+      return { pending: false };
     }
 
     async function loadFamilyForKid(user, familyId, childId) {
@@ -1097,10 +1299,47 @@
     async function doParentLogin(email, password) {
       await signInWithEmailAndPassword(auth, email, password);
     }
+    // Sign up (or sign in if account exists) and submit a join request to
+    // an existing family identified by family code.
+    async function doParentJoin(email, password, famCode) {
+      // 1. Resolve family code → familyId
+      const found = await findFamilyByCode(famCode);
+      if (!found) throw new Error('Family code not found. Ask the account owner to confirm it.');
+      // 2. Try to create the account; if it already exists, sign in instead.
+      let user;
+      try {
+        const cred = await createUserWithEmailAndPassword(auth, email, password);
+        user = cred.user;
+      } catch (e) {
+        if (e.code === 'auth/email-already-in-use') {
+          const cred = await signInWithEmailAndPassword(auth, email, password);
+          user = cred.user;
+        } else {
+          throw e;
+        }
+      }
+      // 3. Submit the join request. (If the user already had a family of
+      //    their own, this will fail at the onAuthStateChanged step because
+      //    findFamilyForParent will return their owned family first. That's
+      //    by design — one family per parent account.)
+      // 4. Check: if the signed-in user is the owner of a family already,
+      //    we shouldn't let them join another one.
+      const ownSnap = await getDoc(doc(db, 'families', user.uid));
+      if (ownSnap.exists()) {
+        throw new Error("This email already owns a family. To join another, sign up with a different email.");
+      }
+      const result = await submitJoinRequest(user, found.familyId);
+      // 5. Stash pending info so the auth-state handler can show the right
+      //    screen.
+      state.pendingJoin = { familyId: found.familyId, familyName: found.familyName };
+      return result;
+    }
     async function doSignOut() {
       teardownSubs();
       state.user = null; state.family = null;
       state.kidSession = null;
+      state.pendingJoin = null;
+      state.isOwner = false;
       await signOut(auth);
       state.view = 'login';
       renderApp();
@@ -1154,14 +1393,20 @@
         createdAt: serverTimestamp()
       });
 
-      // 3. Update family memberUids + kidIndex
+      // 3. Update family memberUids + kidIndex + kidUidToChildId
       const famRef = doc(db, 'families', familyId);
       const newMembers = Array.from(new Set([...(state.family.memberUids||[]), kidUid]));
       const newIndex = { ...(state.family.kidIndex||{}), [slug]: kidUid };
-      await updateDoc(famRef, { memberUids: newMembers, kidIndex: newIndex });
+      const newKidToChild = { ...(state.family.kidUidToChildId||{}), [kidUid]: childRef.id };
+      await updateDoc(famRef, {
+        memberUids: newMembers,
+        kidIndex: newIndex,
+        kidUidToChildId: newKidToChild
+      });
       // Refresh local state.family so subsequent ops see the new arrays
       state.family.memberUids = newMembers;
       state.family.kidIndex = newIndex;
+      state.family.kidUidToChildId = newKidToChild;
 
       return childRef.id;
     }
@@ -1186,15 +1431,22 @@
       const child = state.children.find(c => c.id === childId);
       const familyId = state.family.id;
 
-      // Remove from family kidIndex / memberUids (preserve other kids)
+      // Remove from family kidIndex / memberUids / kidUidToChildId (preserve other kids)
       if (child) {
         const newMembers = (state.family.memberUids||[]).filter(u => u !== child.kidUid);
         const newIndex = { ...(state.family.kidIndex||{}) };
         if (child.nameSlug) delete newIndex[child.nameSlug];
+        const newKidToChild = { ...(state.family.kidUidToChildId||{}) };
+        if (child.kidUid) delete newKidToChild[child.kidUid];
         const famRef = doc(db, 'families', familyId);
-        await updateDoc(famRef, { memberUids: newMembers, kidIndex: newIndex });
+        await updateDoc(famRef, {
+          memberUids: newMembers,
+          kidIndex: newIndex,
+          kidUidToChildId: newKidToChild
+        });
         state.family.memberUids = newMembers;
         state.family.kidIndex = newIndex;
+        state.family.kidUidToChildId = newKidToChild;
       }
 
       // Delete the child doc (transactions/goals subcollections remain
@@ -1338,6 +1590,12 @@
         return;
       }
 
+      if (state.view === 'pending') {
+        root.innerHTML = renderPending();
+        wirePending();
+        return;
+      }
+
       if (state.view === 'kid' && state.kidSession) {
         root.innerHTML = renderKidView();
         wireKid();
@@ -1384,7 +1642,10 @@
     // ----- LOGIN -----
     function renderLogin() {
       const isParent = state.authMode === 'parent';
-      const isSignup = state.authForm === 'signup' && isParent;
+      const formMode = state.authForm; // 'login' | 'signup' | 'join'
+      const isSignup = formMode === 'signup' && isParent;
+      const isJoin = formMode === 'join' && isParent;
+      const isLogin = formMode === 'login' && isParent;
 
       return `
       <div class="auth-wrap">
@@ -1405,12 +1666,17 @@
           ${state.err ? `<div class="err">${escapeHtml(state.err)}</div>` : ''}
 
           ${isParent ? `
-            <h2>${isSignup ? 'Open an account' : 'Welcome back'}</h2>
-            <p class="sub">${isSignup ? 'Create your family bank in a moment.' : 'Sign in to manage your family\'s accounts.'}</p>
+            <h2>${isSignup ? 'Open an account' : isJoin ? 'Join a family' : 'Welcome back'}</h2>
+            <p class="sub">${isSignup ? 'Create your family bank in a moment.' : isJoin ? 'Request access to a family that already exists.' : 'Sign in to manage your family\'s accounts.'}</p>
             ${isSignup ? `
               <div class="field">
                 <label>Family Name</label>
                 <input id="fld-family" type="text" placeholder="The Smith Family" autocomplete="off"/>
+              </div>` : ''}
+            ${isJoin ? `
+              <div class="field">
+                <label>Family Code</label>
+                <input id="fld-famcode-join" type="text" placeholder="e.g., smith42" autocomplete="off" style="text-transform:lowercase;"/>
               </div>` : ''}
             <div class="field">
               <label>Email</label>
@@ -1418,12 +1684,14 @@
             </div>
             <div class="field">
               <label>Password</label>
-              <input id="fld-pwd" type="password" placeholder="${isSignup ? 'At least 8 characters' : '••••••••'}" autocomplete="${isSignup?'new-password':'current-password'}"/>
+              <input id="fld-pwd" type="password" placeholder="${isSignup || isJoin ? 'At least 8 characters' : '••••••••'}" autocomplete="${isSignup||isJoin?'new-password':'current-password'}"/>
             </div>
-            <button class="btn btn-primary" id="auth-submit">${isSignup ? 'Create Account' : 'Sign In'}</button>
-            ${!isSignup ? `<div class="toggle-link" style="margin-top:10px;"><button id="forgot-pwd">Forgot password?</button></div>` : ''}
+            <button class="btn btn-primary" id="auth-submit">${isSignup ? 'Create Account' : isJoin ? 'Request Access' : 'Sign In'}</button>
+            ${isLogin ? `<div class="toggle-link" style="margin-top:10px;"><button id="forgot-pwd">Forgot password?</button></div>` : ''}
             <div class="toggle-link">
-              ${isSignup ? "Already have an account? <button id='toggle-form'>Sign in</button>" : "New to Family Bank? <button id='toggle-form'>Open an account</button>"}
+              ${isLogin ? "New to Family Bank? <button id='go-signup'>Open an account</button> &nbsp;·&nbsp; <button id='go-join'>Join a family</button>"
+                : isSignup ? "Already have an account? <button id='go-login'>Sign in</button>"
+                : "Wrong place? <button id='go-login'>Sign in</button> &nbsp;·&nbsp; <button id='go-signup'>Open an account</button>"}
             </div>
           ` : `
             <h2>Kid sign-in</h2>
@@ -1458,8 +1726,13 @@
         b.onclick = () => { state.authMode = b.dataset.mode; state.err=''; renderApp(); };
       });
 
-      const toggle = document.getElementById('toggle-form');
-      if (toggle) toggle.onclick = () => { state.authForm = state.authForm==='login'?'signup':'login'; state.err=''; renderApp(); };
+      // Three-way form switcher (login | signup | join)
+      const goLogin = document.getElementById('go-login');
+      if (goLogin) goLogin.onclick = () => { state.authForm = 'login'; state.err=''; renderApp(); };
+      const goSignup = document.getElementById('go-signup');
+      if (goSignup) goSignup.onclick = () => { state.authForm = 'signup'; state.err=''; renderApp(); };
+      const goJoin = document.getElementById('go-join');
+      if (goJoin) goJoin.onclick = () => { state.authForm = 'join'; state.err=''; renderApp(); };
 
       const forgot = document.getElementById('forgot-pwd');
       if (forgot) {
@@ -1493,11 +1766,17 @@
               if (pwd.length < 8) { state.err='Password must be at least 8 characters.'; renderApp(); return; }
               const fam = $('#fld-family')?.value.trim() || 'Our Family';
               await doParentSignup(email, pwd, fam);
+            } else if (state.authForm === 'join') {
+              if (pwd.length < 8) { state.err='Password must be at least 8 characters.'; renderApp(); return; }
+              const famCode = ($('#fld-famcode-join')?.value || '').trim().toLowerCase().replace(/[^a-z0-9]/g,'');
+              if (!famCode) { state.err='Enter the family code.'; renderApp(); return; }
+              await doParentJoin(email, pwd, famCode);
+              // onAuthStateChanged will land them on the pending screen
             } else {
               await doParentLogin(email, pwd);
             }
           } catch (e) {
-            state.err = humanizeAuthError(e); renderApp();
+            state.err = e.message || humanizeAuthError(e); renderApp();
           }
         };
       }
@@ -1544,6 +1823,50 @@
       }
     }
 
+    // ----- Pending approval screen (shown to a second parent waiting on owner) -----
+    function renderPending() {
+      const famName = state.pendingJoin?.familyName || 'the family';
+      return `
+      <div class="auth-wrap">
+        <div class="brand">
+          <div class="crest">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#f5efe1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8v4l3 2M12 21a9 9 0 1 1 0-18 9 9 0 0 1 0 18z"/></svg>
+          </div>
+          <h1>Awaiting <em>approval</em></h1>
+          <p>Hang tight</p>
+        </div>
+        <div class="card">
+          <h2>You're almost in</h2>
+          <p class="sub">We sent your request to the owner of <strong>${escapeHtml(famName)}</strong>. Once they approve it, you'll get access to manage the kids' accounts.</p>
+          <p class="sub" style="margin-top:14px;">This screen updates automatically — you can leave it open, or sign out and check back later.</p>
+          <button class="btn btn-ghost" id="pending-refresh" style="margin-top:6px;">Check again</button>
+          <button class="btn btn-ghost" id="pending-signout" style="margin-top:10px;">Sign out</button>
+        </div>
+      </div>
+      `;
+    }
+
+    function wirePending() {
+      const refresh = document.getElementById('pending-refresh');
+      if (refresh) refresh.onclick = async () => {
+        // Re-run the auth flow logic by checking for family membership again
+        if (!state.user) return;
+        const fam = await findFamilyForParent(state.user);
+        if (fam) {
+          // Approved! Reload normally.
+          state.view = 'dashboard';
+          teardownSubs();
+          await loadFamilyAndSubscribe(state.user);
+          renderApp();
+        } else {
+          // Still pending — re-render (will show same screen)
+          renderApp();
+        }
+      };
+      const so = document.getElementById('pending-signout');
+      if (so) so.onclick = () => doSignOut();
+    }
+
     function humanizeAuthError(e) {
       const c = e?.code || '';
       if (c.includes('email-already-in-use')) return 'That email is already registered. Try signing in.';
@@ -1561,6 +1884,7 @@
       const t = fmt(total);
       const txCount = Object.values(state.transactions).reduce((s,arr) => s + (Array.isArray(arr)?arr.length:0), 0);
       const interestEligible = state.children.some(c => c.interestRate > 0 && c.balance > 0);
+      const pendingParents = state.isOwner && Array.isArray(state.family?.pendingRequests) ? state.family.pendingRequests.length : 0;
 
       return `
         <div class="app">
@@ -1569,8 +1893,9 @@
               <small>${escapeHtml(state.family?.name || 'Family Bank')}</small>
               Good ${greetingTime()}
             </div>
-            <button class="icon-btn" id="btn-settings" aria-label="Settings">
+            <button class="icon-btn" id="btn-settings" aria-label="Settings" style="position:relative;">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+              ${pendingParents ? `<span style="position:absolute;top:-2px;right:-2px;background:var(--gold);color:var(--ink);font-size:10px;font-weight:700;min-width:16px;height:16px;border-radius:8px;display:flex;align-items:center;justify-content:center;padding:0 4px;border:2px solid var(--bg);">${pendingParents}</span>` : ''}
             </button>
           </div>
 
@@ -1860,6 +2185,10 @@
 
     // ----- SETTINGS -----
     function renderSettings() {
+      const isOwner = state.isOwner;
+      const fam = state.family || {};
+      const parents = Array.isArray(fam.parents) ? fam.parents : [];
+      const pending = Array.isArray(fam.pendingRequests) ? fam.pendingRequests : [];
       return `
         <div class="app">
           <button class="back-link" id="back">
@@ -1880,15 +2209,61 @@
             </div>
             <button class="list-item" style="width:100%;text-align:left;" id="set-famcode">
               <div class="ico">🔑</div>
-              <div class="label">Family code <small style="display:block;font-weight:400;color:var(--muted);font-size:11px;">Kids use this to sign in</small></div>
-              <div class="val">${state.family?.familyCode ? escapeHtml(state.family.familyCode) : 'Set up →'}</div>
+              <div class="label">Family code <small style="display:block;font-weight:400;color:var(--muted);font-size:11px;">Kids use this to sign in${isOwner ? '' : ' · only the owner can change it'}</small></div>
+              <div class="val">${state.family?.familyCode ? escapeHtml(state.family.familyCode) : (isOwner ? 'Set up →' : '—')}</div>
             </button>
             <div class="list-item">
               <div class="ico">✉️</div>
               <div class="label">Signed in as</div>
-              <div class="val">${escapeHtml(state.user?.email||'')}</div>
+              <div class="val">${escapeHtml(state.user?.email||'')}${isOwner ? ' <small style="display:block;color:var(--muted);font-size:11px;">Owner</small>' : ''}</div>
             </div>
           </div>
+
+          <div class="section-head"><h3>Parents${isOwner && pending.length ? ` <span style="font-size:11px;background:var(--gold);color:var(--ink);padding:2px 8px;border-radius:10px;margin-left:6px;vertical-align:middle;">${pending.length} pending</span>` : ''}</h3></div>
+          <div class="list-block">
+            ${parents.length === 0 ? `<div class="list-item"><div class="label" style="color:var(--muted)">No parents yet</div></div>` :
+              parents.map(uid => {
+                const isThisOwner = uid === fam.ownerUid;
+                const isMe = uid === state.user?.uid;
+                // We don't store parent emails on the family doc; only show the
+                // owner's email for themselves. For other parents, show a short uid.
+                const labelText = isMe
+                  ? (state.user.email || 'You')
+                  : (isThisOwner ? 'Owner' : 'Parent · ' + uid.slice(0,6));
+                const tag = isThisOwner
+                  ? '<small style="display:block;color:var(--muted);font-size:11px;">Owner — can\'t be removed</small>'
+                  : (isMe ? '<small style="display:block;color:var(--muted);font-size:11px;">You</small>' : '');
+                return `
+                <div class="list-item">
+                  <div class="ico">${isThisOwner ? '👑' : '👤'}</div>
+                  <div class="label">${escapeHtml(labelText)}${tag}</div>
+                  ${isOwner && !isThisOwner ? `<button data-revoke="${escapeHtml(uid)}" style="background:none;border:none;color:var(--red);font-weight:600;font-size:13px;cursor:pointer">Remove</button>` : ''}
+                </div>`;
+              }).join('')
+            }
+          </div>
+
+          ${isOwner && pending.length ? `
+            <div class="section-head"><h3>Pending requests</h3></div>
+            <div class="list-block">
+              ${pending.map(r => `
+                <div class="list-item" style="flex-wrap:wrap;gap:8px;">
+                  <div class="ico">⏳</div>
+                  <div class="label" style="flex:1;min-width:0;">${escapeHtml(r.email || ('Parent · ' + (r.uid||'').slice(0,6)))}<small style="display:block;color:var(--muted);font-size:11px;">Requested ${formatDate(r.requestedAt)}</small></div>
+                  <div style="display:flex;gap:6px;">
+                    <button data-approve="${escapeHtml(r.uid)}" class="btn btn-primary" style="width:auto;padding:8px 14px;font-size:13px;">Approve</button>
+                    <button data-deny="${escapeHtml(r.uid)}" class="btn btn-ghost" style="width:auto;padding:8px 14px;font-size:13px;">Deny</button>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          ` : ''}
+
+          ${isOwner ? `
+            <p class="sub" style="font-size:12px;color:var(--muted);margin-top:-10px;margin-bottom:18px;">
+              Another parent can request access by signing up with "Join a family" and entering your family code.
+            </p>
+          ` : ''}
 
           <div class="section-head"><h3>Children</h3></div>
           <div class="list-block">
@@ -1923,9 +2298,48 @@
       $('#back').onclick = () => { state.view='dashboard'; renderApp(); };
       $('#signout').onclick = () => { if (confirm('Sign out?')) doSignOut(); };
       $('#add-kid-btn').onclick = () => { state.modal='addKid'; renderApp(); };
-      $('#set-famcode').onclick = () => { state.modal='famcode'; state.modalCtx={}; renderApp(); };
+      const fc = $('#set-famcode');
+      if (fc) fc.onclick = () => {
+        if (!state.isOwner) { alert('Only the family owner can change the family code.'); return; }
+        state.modal='famcode'; state.modalCtx={}; renderApp();
+      };
       document.querySelectorAll('[data-editkid]').forEach(b => b.onclick = () => {
         state.modal='editKid'; state.modalCtx={childId: b.dataset.editkid}; renderApp();
+      });
+      document.querySelectorAll('[data-approve]').forEach(b => b.onclick = async () => {
+        const uid = b.dataset.approve;
+        b.disabled = true;
+        try {
+          await approveParentRequest(uid);
+        } catch (e) {
+          alert(e.message || 'Could not approve.');
+        } finally {
+          b.disabled = false;
+        }
+      });
+      document.querySelectorAll('[data-deny]').forEach(b => b.onclick = async () => {
+        const uid = b.dataset.deny;
+        if (!confirm('Deny this request? They can request again later.')) return;
+        b.disabled = true;
+        try {
+          await denyParentRequest(uid);
+        } catch (e) {
+          alert(e.message || 'Could not deny.');
+        } finally {
+          b.disabled = false;
+        }
+      });
+      document.querySelectorAll('[data-revoke]').forEach(b => b.onclick = async () => {
+        const uid = b.dataset.revoke;
+        if (!confirm("Remove this parent's access? They'll be signed out immediately.")) return;
+        b.disabled = true;
+        try {
+          await revokeParentAccess(uid);
+        } catch (e) {
+          alert(e.message || 'Could not remove.');
+        } finally {
+          b.disabled = false;
+        }
       });
       wireModal();
     }
@@ -2280,29 +2694,42 @@
           // Detect whether this is a kid account by checking the email pattern
           const isKid = (user.email || '').startsWith('kid+');
           if (isKid) {
-            // Parse familyId and child name from the kid email:
+            // Parse familyId and (legacy) name slug from the kid email:
             //   kid+{familyId}+{slug}@{KID_EMAIL_DOMAIN}
             const m = (user.email || '').match(/^kid\+([^+]+)\+([^@]+)@/);
             if (!m) {
               state.err = 'Kid account email malformed.'; state.view='login'; renderApp(); return;
             }
             const familyId = m[1];
-            const slug = m[2];
-            // Find child doc by slug
+            // Find the kid's child doc via direct gets only (no list query).
+            // Step 1: read the family doc — kid is in memberUids, so allowed.
+            // Step 2: look up the childDocId by the kid's own auth uid in
+            //         the family's kidUidToChildId index.
+            // Step 3: direct get on the kid's child doc.
             try {
-              const qs = await getDocs(query(
-                collection(db, 'families', familyId, 'children'),
-                where('nameSlug', '==', slug),
-                limit(1)
-              ));
-              if (qs.empty) {
+              const famSnap = await getDoc(doc(db, 'families', familyId));
+              if (!famSnap.exists()) {
+                state.err = 'Family not found.';
+                await signOut(auth); return;
+              }
+              const famData = famSnap.data();
+              let childId = (famData.kidUidToChildId || {})[user.uid];
+              // Fallback path for families that haven't been migrated yet:
+              // the legacy kidIndex maps slug -> kidUid (wrong direction
+              // for us). The parent owner needs to sign in once to trigger
+              // migration. Tell the kid that politely.
+              if (!childId) {
+                state.err = 'Your account is not fully set up. Ask a parent to sign in once, then try again.';
+                await signOut(auth); return;
+              }
+              const childSnap = await getDoc(doc(db, 'families', familyId, 'children', childId));
+              if (!childSnap.exists()) {
                 state.err = 'Your account was removed by a parent.';
                 await signOut(auth); return;
               }
-              const childDoc = qs.docs[0];
-              state.kidSession = { childId: childDoc.id, name: childDoc.data().name, familyId };
+              state.kidSession = { childId, name: childSnap.data().name, familyId };
               state.view = 'kid';
-              await loadFamilyForKid(user, familyId, childDoc.id);
+              await loadFamilyForKid(user, familyId, childId);
               renderApp();
             } catch (e) {
               state.err = 'Could not load your account: ' + (e.message||e);
@@ -2311,8 +2738,12 @@
           } else {
             // Parent
             state.kidSession = null;
-            state.view = 'dashboard';
-            await loadFamilyAndSubscribe(user);
+            const result = await loadFamilyAndSubscribe(user);
+            if (result && result.pending) {
+              state.view = 'pending';
+            } else {
+              state.view = 'dashboard';
+            }
             renderApp();
           }
         } else {
